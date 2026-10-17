@@ -5,8 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Hitster DIY Game</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Spotify Web Playback SDK -->
-  <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <style>
     body { touch-action: manipulation; user-select: none; }
   </style>
@@ -22,8 +20,8 @@
 
     <!-- Playlist Loader -->
     <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-3">
-      <label class="block text-sm font-semibold text-slate-300">1. Load Playlist (JSON)</label>
-      <input type="file" id="json-input" accept=".json" class="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 cursor-pointer"/>
+      <label class="block text-sm font-semibold text-slate-300">1. Load Playlist (Exportify CSV or JSON)</label>
+      <input type="file" id="playlist-input" accept=".csv,.json" class="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 cursor-pointer"/>
       <p id="song-count" class="text-xs text-emerald-400 hidden">✓ Loaded <span id="count-num">0</span> songs.</p>
     </div>
 
@@ -37,11 +35,21 @@
       <ul id="player-list" class="space-y-1 text-sm text-slate-300"></ul>
     </div>
 
-    <!-- Spotify Connect Status -->
-    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-3">
-      <label class="block text-sm font-semibold text-slate-300">3. Spotify Access Token</label>
-      <input type="password" id="spotify-token" placeholder="Paste Spotify OAuth Token" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs"/>
-      <p class="text-[10px] text-slate-400">Get a temporary token from <a href="https://developer.spotify.com/documentation/web-api/concepts/authorization" target="_blank" class="underline text-emerald-400">Spotify Developer Console</a> or use active Spotify desktop/mobile playback.</p>
+    <!-- Preview region -->
+    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-2">
+      <label for="country-select" class="block text-sm font-semibold text-slate-300">3. Music store region</label>
+      <select id="country-select" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm">
+        <option value="GB">United Kingdom</option>
+        <option value="US">United States</option>
+        <option value="IE">Ireland</option>
+        <option value="ES">Spain</option>
+        <option value="PT">Portugal</option>
+        <option value="FR">France</option>
+        <option value="DE">Germany</option>
+        <option value="IT">Italy</option>
+        <option value="NL">Netherlands</option>
+      </select>
+      <p class="text-[11px] text-slate-400">Songs play as 30-second previews. No Spotify login needed. Songs with no preview are skipped automatically.</p>
     </div>
 
     <button id="start-game-btn" class="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-lg shadow-lg disabled:opacity-50" disabled>Start Game</button>
@@ -49,7 +57,6 @@
 
   <!-- GAME SCREEN -->
   <div id="game-screen" class="hidden min-h-screen flex-1 flex flex-col justify-between p-6">
-    <!-- Header: Scoreboard -->
     <div class="flex justify-between items-start bg-slate-800/80 p-4 rounded-xl backdrop-blur">
       <div>
         <p class="text-xs uppercase tracking-wider text-slate-400">Current Turn</p>
@@ -58,32 +65,33 @@
       <button id="scoreboard-toggle" class="bg-slate-700 text-xs px-3 py-2 rounded-lg text-slate-300">Scores ▾</button>
     </div>
 
-    <!-- Score Overlay (Collapsible) -->
-    <div id="scoreboard-drawer" class="hidden bg-slate-800 border border-slate-700 p-4 rounded-xl text-sm space-y-2">
+    <div id="scoreboard-drawer" class="hidden bg-slate-800 border border-slate-700 p-4 rounded-xl text-sm space-y-2 mt-3">
       <h3 class="font-bold text-slate-300 mb-2 border-b border-slate-700 pb-1">Leaderboard</h3>
       <div id="scores-list" class="space-y-1"></div>
     </div>
 
-    <!-- Main Dynamic Zone -->
     <div id="interaction-zone" class="my-auto text-center py-10 space-y-6">
       <div id="status-card" class="bg-slate-800/50 border-2 border-dashed border-slate-700 rounded-3xl p-8 flex flex-col items-center justify-center min-h-[250px]">
-        
+
         <!-- State A: Idle -->
         <div id="state-idle" class="space-y-3">
           <div class="text-5xl mb-2">📱</div>
           <h2 class="text-2xl font-bold">Flip phone face-down</h2>
-          <p class="text-sm text-slate-400">or tap the button below to start playback</p>
+          <p id="ready-status" class="text-sm text-slate-400">Finding the next song…</p>
         </div>
 
-        <!-- State B: Playing (Hidden Answers) -->
+        <!-- State B: Playing -->
         <div id="state-playing" class="hidden space-y-3">
           <div class="animate-pulse text-5xl mb-2">🎵</div>
           <h2 class="text-2xl font-bold text-amber-400">Song is Playing!</h2>
           <p class="text-sm text-slate-400">Place the song on your timeline.<br/>Flip phone face-up to reveal the answer.</p>
+          <button id="tap-to-play-btn" class="hidden mt-2 px-6 py-3 bg-amber-400 text-slate-950 font-bold rounded-xl">▶ Tap to play</button>
+          <button id="replay-btn" class="mt-2 px-4 py-2 bg-slate-700 text-slate-200 text-sm rounded-lg">↺ Replay</button>
         </div>
 
-        <!-- State C: Revealed (Answer Screen) -->
-        <div id="state-revealed" class="hidden space-y-4">
+        <!-- State C: Revealed -->
+        <div id="state-revealed" class="hidden space-y-4 flex flex-col items-center">
+          <img id="revealed-art" alt="" class="hidden w-32 h-32 rounded-xl shadow-lg object-cover"/>
           <span id="revealed-year" class="inline-block bg-emerald-500/20 text-emerald-300 font-extrabold text-4xl px-4 py-2 rounded-xl border border-emerald-500/30">1999</span>
           <div class="space-y-1">
             <h2 id="revealed-title" class="text-xl font-bold text-white">Song Title</h2>
@@ -93,15 +101,13 @@
 
       </div>
 
-      <!-- Controls & Scoring Actions -->
       <div class="space-y-3">
-        <!-- Manual Sensor Fallback Buttons -->
         <div class="flex gap-2">
-          <button id="manual-play-btn" class="flex-1 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm font-semibold rounded-xl">Simulate Flip Down (Play)</button>
-          <button id="manual-reveal-btn" class="flex-1 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm font-semibold rounded-xl">Simulate Flip Up (Reveal)</button>
+          <button id="manual-play-btn" class="flex-1 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm font-semibold rounded-xl">Play (flip down)</button>
+          <button id="manual-reveal-btn" class="flex-1 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm font-semibold rounded-xl">Reveal (flip up)</button>
         </div>
+        <p id="sensor-status" class="text-xs text-slate-500">Motion sensor: starting…</p>
 
-        <!-- Score Awarding (Visible on Reveal) -->
         <div id="score-actions" class="hidden flex gap-3 pt-2">
           <button id="score-correct-btn" class="flex-1 py-4 bg-emerald-500 text-slate-950 font-extrabold rounded-xl text-lg shadow-lg">Correct (+1)</button>
           <button id="score-wrong-btn" class="flex-1 py-4 bg-rose-500/20 text-rose-300 border border-rose-500/30 font-extrabold rounded-xl text-lg">Wrong (Pass)</button>
@@ -111,222 +117,339 @@
   </div>
 
   <script>
-    // App State
+    // ---------- State ----------
     let songList = [];
     let players = [];
     let currentPlayerIndex = 0;
-    let currentSong = null;
-    let gameState = 'idle'; // 'idle', 'playing', 'revealed'
-    let spotifyPlayer = null;
-    let deviceId = null;
+    let currentSong = null;   // { title, artist, year, preview, art }
+    let nextSong = null;      // prepared in advance
+    let preparing = false;
+    let gameState = 'idle';   // 'idle' | 'playing' | 'revealed'
+    let isFaceDown = false;
+    const audio = new Audio();
+    audio.preload = 'auto';
 
-    // Elements
-    const setupScreen = document.getElementById('setup-screen');
-    const gameScreen = document.getElementById('game-screen');
-    const jsonInput = document.getElementById('json-input');
-    const songCountEl = document.getElementById('song-count');
-    const countNumEl = document.getElementById('count-num');
-    const playerNameInput = document.getElementById('player-name-input');
-    const addPlayerBtn = document.getElementById('add-player-btn');
-    const playerListEl = document.getElementById('player-list');
-    const startGameBtn = document.getElementById('start-game-btn');
-    const spotifyTokenInput = document.getElementById('spotify-token');
+    const $ = id => document.getElementById(id);
+    const setupScreen = $('setup-screen'), gameScreen = $('game-screen');
+    const startGameBtn = $('start-game-btn');
+    const stateIdle = $('state-idle'), statePlaying = $('state-playing'), stateRevealed = $('state-revealed');
+    const readyStatus = $('ready-status'), scoreActions = $('score-actions');
+    const tapToPlayBtn = $('tap-to-play-btn');
 
-    const currentPlayerEl = document.getElementById('current-player');
-    const stateIdle = document.getElementById('state-idle');
-    const statePlaying = document.getElementById('state-playing');
-    const stateRevealed = document.getElementById('state-revealed');
-    const revealedTitle = document.getElementById('revealed-title');
-    const revealedArtist = document.getElementById('revealed-artist');
-    const revealedYear = document.getElementById('revealed-year');
-    const scoreActions = document.getElementById('score-actions');
+    const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-    // 1. Load JSON Data
-    jsonInput.addEventListener('change', (e) => {
+    // ---------- 1. Load playlist (CSV or JSON) ----------
+    $('playlist-input').addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (!file) return;
       const reader = new FileReader();
       reader.onload = (event) => {
         try {
-          const rawData = JSON.parse(event.target.result);
-          // Normalize Exportify or standard JSON keys
-          songList = rawData.map(item => ({
-            title: item["Track Name"] || item.title || item.name || "Unknown Title",
-            artist: item["Artist Name(s)"] || item.artist || (item.artists ? item.artists[0].name : "Unknown Artist"),
-            year: extractYear(item["Album Release Date"] || item.year || item.release_date),
-            uri: item["Track URI"] || item.uri || item.spotify_uri
-          })).filter(s => s.uri && s.year);
+          const text = event.target.result;
+          const rawData = file.name.toLowerCase().endsWith('.csv') ? parseCSV(text) : JSON.parse(text);
+          songList = rawData.map(item => {
+            const artistRaw = item["Artist Name(s)"] || item.artist || (item.artists ? item.artists[0].name : "");
+            return {
+              title: item["Track Name"] || item.title || item.name || "",
+              artist: String(artistRaw).replace(/;/g, ', '),
+              firstArtist: String(artistRaw).split(/;/)[0].trim(),
+              year: extractYear(item["Album Release Date"] || item.year || item.release_date)
+            };
+          }).filter(s => s.title && s.artist);
 
-          countNumEl.textContent = songList.length;
-          songCountEl.classList.remove('hidden');
+          $('count-num').textContent = songList.length;
+          $('song-count').classList.remove('hidden');
           checkReadyToStart();
         } catch (err) {
-          alert('Invalid JSON file. Please convert your Exportify CSV at csvjson.com first.');
+          alert("Couldn't read that file. Use the CSV straight from Exportify, or a JSON list of songs.");
         }
       };
       reader.readAsText(file);
     });
 
-    function extractYear(val) {
-      if (!val) return "????";
-      const match = String(val).match(/\d{4}/);
-      return match ? match[0] : "????";
+    function parseCSV(text) {
+      const rows = []; let row = [], field = '', inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (inQuotes) {
+          if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false; }
+          else field += c;
+        } else if (c === '"') inQuotes = true;
+        else if (c === ',') { row.push(field); field = ''; }
+        else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+        else if (c !== '\r') field += c;
+      }
+      if (field || row.length) { row.push(field); rows.push(row); }
+      const [header, ...rest] = rows;
+      const keys = header.map(k => k.replace(/^\uFEFF/, '').trim());
+      return rest.filter(r => r.length > 1).map(r => Object.fromEntries(keys.map((k, i) => [k, r[i] ?? ''])));
     }
 
-    // 2. Player Entry
-    addPlayerBtn.addEventListener('click', () => {
-      const name = playerNameInput.value.trim();
+    function extractYear(val) {
+      const match = String(val || '').match(/\d{4}/);
+      return match ? match[0] : null;
+    }
+
+    // ---------- 2. Players ----------
+    $('add-player-btn').addEventListener('click', addPlayer);
+    $('player-name-input').addEventListener('keydown', e => { if (e.key === 'Enter') addPlayer(); });
+
+    function addPlayer() {
+      const input = $('player-name-input');
+      const name = input.value.trim();
       if (!name) return;
       players.push({ name, score: 0 });
-      playerNameInput.value = '';
+      input.value = '';
       renderPlayers();
       checkReadyToStart();
-    });
+    }
 
     function renderPlayers() {
-      playerListEl.innerHTML = players.map(p => `<li class="flex justify-between py-1 border-b border-slate-700/50"><span>${p.name}</span><span class="font-bold text-emerald-400">${p.score} pts</span></li>`).join('');
+      const html = players.map(p => `<li class="flex justify-between py-1 border-b border-slate-700/50"><span>${escapeHtml(p.name)}</span><span class="font-bold text-emerald-400">${p.score} pts</span></li>`).join('');
+      $('player-list').innerHTML = html;
+      $('scores-list').innerHTML = html;
     }
 
     function checkReadyToStart() {
       startGameBtn.disabled = !(songList.length > 0 && players.length > 0);
     }
 
-    // 3. Start Game
+    // ---------- 3. Start ----------
     startGameBtn.addEventListener('click', () => {
+      requestMotionPermission(); // must be the first thing in the tap on iPhone
+      unlockAudio();             // must happen inside a tap, or phones block later playback
+      keepScreenAwake();
       setupScreen.classList.add('hidden');
       gameScreen.classList.remove('hidden');
-      requestOrientationPermission();
       updateTurnDisplay();
+      prepareNextSong();
     });
 
-    function updateTurnDisplay() {
-      currentPlayerEl.textContent = players[currentPlayerIndex].name;
+    function unlockAudio() {
+      // A tiny silent clip played during a user tap "unlocks" this audio element on iOS/Android
+      audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+      audio.play().then(() => audio.pause()).catch(() => {});
     }
 
-    // 4. Gyroscope / Device Orientation Handling
-    function requestOrientationPermission() {
-      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        DeviceOrientationEvent.requestPermission().then(state => {
-          if (state === 'granted') {
-            window.addEventListener('deviceorientation', handleOrientation);
-          }
+    async function keepScreenAwake() {
+      try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {}
+    }
+
+    function updateTurnDisplay() {
+      $('current-player').textContent = players[currentPlayerIndex].name;
+    }
+
+    // ---------- 4. Find previews (iTunes Search, no login) ----------
+    function itunesSearch(term) {
+      return new Promise((resolve, reject) => {
+        const cb = 'itcb_' + Date.now() + Math.random().toString(36).slice(2);
+        const script = document.createElement('script');
+        const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, 8000);
+        function cleanup() { clearTimeout(timer); delete window[cb]; script.remove(); }
+        window[cb] = data => { cleanup(); resolve(data); };
+        script.onerror = () => { cleanup(); reject(new Error('network')); };
+        const country = $('country-select').value;
+        script.src = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=15&country=${country}&callback=${cb}`;
+        document.head.appendChild(script);
+      });
+    }
+
+    const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
+
+    function cleanTitle(t) {
+      return String(t)
+        .replace(/\s+-\s+.*(remaster|mono|stereo|version|edit|mix|live|single|deluxe|anniversary).*$/i, '')
+        .replace(/\s*[\(\[][^\)\]]*(feat|ft\.|with |remaster|version|edit|mix|mono|stereo)[^\)\]]*[\)\]]/gi, '')
+        .trim();
+    }
+
+    async function findPreview(song) {
+      const title = cleanTitle(song.title);
+      const data = await itunesSearch(`${song.firstArtist} ${title}`);
+      const wantTitle = norm(title), wantArtist = norm(song.firstArtist);
+      let best = null, bestScore = 0;
+      for (const r of (data.results || [])) {
+        if (!r.previewUrl) continue;
+        const gotTitle = norm(cleanTitle(r.trackName));
+        const gotArtist = norm(r.artistName);
+        const titleMatch = gotTitle === wantTitle ||
+          (wantTitle.length >= 3 && (gotTitle.startsWith(wantTitle) || wantTitle.startsWith(gotTitle)));
+        if (!titleMatch) continue;  // never play a different song
+        const artistMatch = gotArtist.includes(wantArtist) || wantArtist.includes(gotArtist);
+        const score = 2 + (artistMatch ? 1 : 0);
+        if (score > bestScore) { best = r; bestScore = score; }
+      }
+      if (!best) return null;
+      return {
+        title: song.title,
+        artist: song.artist,
+        year: song.year || extractYear(best.releaseDate) || '????',
+        preview: best.previewUrl,
+        art: best.artworkUrl100 ? best.artworkUrl100.replace('100x100bb', '300x300bb') : null
+      };
+    }
+
+    async function prepareNextSong() {
+      if (preparing || nextSong) return;
+      preparing = true;
+      readyStatus.textContent = 'Finding the next song…';
+      let misses = 0;
+      while (songList.length > 0 && !nextSong) {
+        const song = songList.splice(Math.floor(Math.random() * songList.length), 1)[0];
+        try {
+          const found = await findPreview(song);
+          if (found) { nextSong = found; break; }
+        } catch (e) {
+          misses++;
+          if (misses >= 3) { readyStatus.textContent = "Can't reach the music service. Check the internet connection."; preparing = false; return; }
+        }
+      }
+      preparing = false;
+      if (nextSong) {
+        readyStatus.textContent = 'Ready! Flip down or tap Play.';
+        new Image().src = nextSong.art || '';
+        if (isFaceDown && gameState === 'idle') startSongPlayback();
+      } else {
+        readyStatus.textContent = 'No more songs left. Check the scores!';
+      }
+    }
+
+    // ---------- 5. Flip detection (gravity-based) ----------
+    // Reads which way gravity points through the screen. Phones disagree on the
+    // sign, so the first clear reading (taken while you're looking at the screen
+    // after tapping Start) is treated as "face up".
+    const sensorStatus = $('sensor-status');
+    let faceUpSign = 0;          // +1 or -1 once calibrated
+    let gotMotion = false;
+    let pendingPose = null, poseSince = 0;
+    const HOLD_MS = 350;         // pose must be held this long (ignores mid-flip)
+
+    function requestMotionPermission() {
+      if (!window.isSecureContext) {
+        sensorStatus.textContent = 'Motion sensor: needs an https:// address (e.g. GitHub Pages). Use the buttons.';
+        return;
+      }
+      if (typeof DeviceMotionEvent === 'undefined') {
+        sensorStatus.textContent = 'Motion sensor: not available on this device. Use the buttons.';
+        return;
+      }
+      if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        DeviceMotionEvent.requestPermission().then(state => {
+          if (state === 'granted') startMotion();
+          else sensorStatus.textContent = 'Motion sensor: permission denied. Close the tab, reopen and tap Allow.';
+        }).catch(() => {
+          sensorStatus.textContent = "Motion sensor: couldn't ask for permission. Use the buttons.";
         });
       } else {
-        window.addEventListener('deviceorientation', handleOrientation);
+        startMotion();
       }
     }
 
-    function handleOrientation(event) {
-      const beta = event.beta; // Front-to-back tilt in degrees (-180 to 180)
-      
-      // Face Down Detection (Phone on table screen down -> beta near 180 or -180)
-      const isFaceDown = Math.abs(beta) > 150;
-      // Face Up Detection (Screen visible -> beta between 0 and 60)
-      const isFaceUp = Math.abs(beta) < 40;
-
-      if (isFaceDown && gameState === 'idle') {
-        startSongPlayback();
-      } else if (isFaceUp && gameState === 'playing') {
-        revealSongDetails();
-      }
+    function startMotion() {
+      window.addEventListener('devicemotion', handleMotion);
+      sensorStatus.textContent = 'Motion sensor: waiting for data…';
+      setTimeout(() => {
+        if (!gotMotion) sensorStatus.textContent = 'Motion sensor: no data coming through. Use the buttons.';
+      }, 3000);
     }
 
-    // 5. Game Loop Controls
+    function handleMotion(e) {
+      const g = e.accelerationIncludingGravity;
+      if (!g || g.z === null) return;
+      gotMotion = true;
+      const z = g.z;
+
+      if (!faceUpSign) {
+        if (Math.abs(z) > 4) {
+          faceUpSign = Math.sign(z);
+          sensorStatus.textContent = 'Motion sensor: active ✓';
+        } else {
+          sensorStatus.textContent = 'Motion sensor: tilt the screen towards you to set up…';
+        }
+        return;
+      }
+
+      const up = z * faceUpSign;   // ~+9.8 flat face-up, ~-9.8 flat face-down
+      let pose = null;
+      if (up < -6) pose = 'down';
+      else if (up > 2) pose = 'up';
+
+      if (pose !== pendingPose) { pendingPose = pose; poseSince = Date.now(); return; }
+      if (!pose || Date.now() - poseSince < HOLD_MS) return;
+
+      isFaceDown = pose === 'down';
+      if (pose === 'down' && gameState === 'idle') startSongPlayback();
+      else if (pose === 'up' && gameState === 'playing') revealSongDetails();
+    }
+
+    // ---------- 6. Game loop ----------
     function startSongPlayback() {
-      if (songList.length === 0) return alert('No more songs left!');
+      if (!nextSong) return;
       gameState = 'playing';
+      currentSong = nextSong;
+      nextSong = null;
 
-      // Pick random song
-      const randomIndex = Math.floor(Math.random() * songList.length);
-      currentSong = songList.splice(randomIndex, 1)[0];
+      audio.src = currentSong.preview;
+      tapToPlayBtn.classList.add('hidden');
+      audio.play().catch(() => tapToPlayBtn.classList.remove('hidden'));
 
-      // Play via Spotify Web API / Active Device
-      playSpotifyTrack(currentSong.uri);
-
-      // UI Update
       stateIdle.classList.add('hidden');
       stateRevealed.classList.add('hidden');
       statePlaying.classList.remove('hidden');
       scoreActions.classList.add('hidden');
     }
 
+    tapToPlayBtn.addEventListener('click', () => {
+      audio.play().then(() => tapToPlayBtn.classList.add('hidden')).catch(() => {});
+    });
+    $('replay-btn').addEventListener('click', () => {
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+    });
+
     function revealSongDetails() {
       gameState = 'revealed';
-      
-      // Pause track or let play
-      pauseSpotifyTrack();
+      audio.pause();
 
-      // UI Update
-      revealedTitle.textContent = currentSong.title;
-      revealedArtist.textContent = currentSong.artist;
-      revealedYear.textContent = currentSong.year;
+      $('revealed-title').textContent = currentSong.title;
+      $('revealed-artist').textContent = currentSong.artist;
+      $('revealed-year').textContent = currentSong.year;
+      const art = $('revealed-art');
+      if (currentSong.art) { art.src = currentSong.art; art.classList.remove('hidden'); }
+      else art.classList.add('hidden');
 
       statePlaying.classList.add('hidden');
       stateRevealed.classList.remove('hidden');
       scoreActions.classList.remove('hidden');
+      prepareNextSong();   // look up the next one while scores are given
     }
 
-    // 6. Scoring & Turns
-    document.getElementById('score-correct-btn').addEventListener('click', () => {
+    $('score-correct-btn').addEventListener('click', () => {
       players[currentPlayerIndex].score += 1;
       nextTurn();
     });
-
-    document.getElementById('score-wrong-btn').addEventListener('click', () => {
-      nextTurn();
-    });
+    $('score-wrong-btn').addEventListener('click', nextTurn);
 
     function nextTurn() {
       currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
       gameState = 'idle';
       updateTurnDisplay();
       renderPlayers();
-
       stateRevealed.classList.add('hidden');
       statePlaying.classList.add('hidden');
       stateIdle.classList.remove('hidden');
       scoreActions.classList.add('hidden');
+      if (nextSong) readyStatus.textContent = 'Ready! Flip down or tap Play.';
+      else prepareNextSong();
     }
 
-    // Manual Fallbacks
-    document.getElementById('manual-play-btn').addEventListener('click', () => {
-      if (gameState === 'idle') startSongPlayback();
+    $('manual-play-btn').addEventListener('click', () => { if (gameState === 'idle') startSongPlayback(); });
+    $('manual-reveal-btn').addEventListener('click', () => { if (gameState === 'playing') revealSongDetails(); });
+
+    $('scoreboard-toggle').addEventListener('click', () => {
+      renderPlayers();
+      $('scoreboard-drawer').classList.toggle('hidden');
     });
-    document.getElementById('manual-reveal-btn').addEventListener('click', () => {
-      if (gameState === 'playing') revealSongDetails();
-    });
-
-    // Scoreboard Drawer Toggle
-    document.getElementById('scoreboard-toggle').addEventListener('click', () => {
-      const drawer = document.getElementById('scoreboard-drawer');
-      drawer.classList.toggle('hidden');
-      document.getElementById('scores-list').innerHTML = players.map(p => `<div class="flex justify-between"><span>${p.name}</span><span class="font-bold text-emerald-400">${p.score} pts</span></div>`).join('');
-    });
-
-    // 7. Spotify Web API Integration
-    function playSpotifyTrack(trackUri) {
-      const token = spotifyTokenInput.value.trim();
-      if (!token) return;
-
-      fetch(`https://api.spotify.com/v1/me/player/play`, {
-        method: 'PUT',
-        body: JSON.stringify({ uris: [trackUri] }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      }).catch(err => console.log('Spotify Web API call failed:', err));
-    }
-
-    function pauseSpotifyTrack() {
-      const token = spotifyTokenInput.value.trim();
-      if (!token) return;
-
-      fetch(`https://api.spotify.com/v1/me/player/pause`, {
-        method: 'PUT',
-        headers: { 'Authorization': `Bearer ${token}` }
-      }).catch(err => console.log('Pause failed:', err));
-    }
   </script>
 </body>
 </html>
