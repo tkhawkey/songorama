@@ -13,6 +13,23 @@
   </style>
 </head>
 <body class="bg-slate-900 text-white min-h-screen flex flex-col font-sans">
+  <div id="error-bar" style="display:none" class="bg-rose-600 text-white text-xs p-3 font-mono break-words"></div>
+  <script>
+    (function () {
+      function show(msg) {
+        var bar = document.getElementById('error-bar');
+        if (!bar) return;
+        bar.style.display = 'block';
+        bar.textContent += (bar.textContent ? ' | ' : 'Error (please send this to Claude): ') + msg;
+      }
+      window.addEventListener('error', function (e) {
+        show((e.message || 'unknown error') + (e.lineno ? ' (line ' + e.lineno + ')' : ''));
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        show('Unhandled: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+      });
+    })();
+  </script>
 
   <!-- SETUP SCREEN -->
   <div id="setup-screen" class="p-6 max-w-md mx-auto flex-1 flex flex-col justify-center w-full space-y-6">
@@ -31,7 +48,7 @@
     <!-- Player Entry -->
     <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-3">
       <label class="block text-sm font-semibold text-slate-300">2. Players / Teams</label>
-      <form id="player-form" class="flex gap-2" autocomplete="off">
+      <form id="player-form" class="flex gap-2" autocomplete="off" onsubmit="return false;">
         <input type="text" id="player-name-input" placeholder="Enter name" enterkeyhint="done" class="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-base focus:outline-none focus:border-emerald-500"/>
         <button type="submit" id="add-player-btn" class="bg-slate-700 hover:bg-slate-600 text-white font-bold px-4 rounded-lg">Add</button>
       </form>
@@ -217,7 +234,7 @@
       if (field || row.length) { row.push(field); rows.push(row); }
       const [header, ...rest] = rows;
       const keys = header.map(k => k.replace(/^\uFEFF/, '').trim());
-      return rest.filter(r => r.length > 1).map(r => Object.fromEntries(keys.map((k, i) => [k, r[i] ?? ''])));
+      return rest.filter(r => r.length > 1).map(r => Object.fromEntries(keys.map((k, i) => [k, r[i] !== undefined ? r[i] : ''])));
     }
 
     function extractYear(val) {
@@ -386,4 +403,271 @@
       if (res.ok) return;
       if (deviceId) {                     // device may have gone to sleep: look again
         cachedDeviceId = null;
-        res = await pla
+        res = await playOn(await getDeviceId());
+        if (res.ok) return;
+      }
+      throw new Error(explainStatus(res.status, 'starting the song'));
+    }
+
+    function spotifyPause() { spotifyFetch('/me/player/pause', { method: 'PUT' }).catch(() => {}); }
+
+    $('spotify-test-btn').addEventListener('click', async () => {
+      updateSpotifyStatus('Checking…');
+      try {
+        const res = await spotifyFetch('/me/player/devices');
+        if (!res.ok) throw new Error(explainStatus(res.status, 'checking devices'));
+        const { devices = [] } = await res.json();
+        updateSpotifyStatus(devices.length
+          ? 'Logged in ✓ Devices: ' + devices.map(d => d.name + (d.is_active ? ' (active)' : '')).join(', ')
+          : 'Logged in ✓ but Spotify reports no devices. Start a song in Spotify, leave it playing, and test again.');
+      } catch (e) { updateSpotifyStatus(e.message); }
+    });
+
+    // ---------- 4. Start ----------
+    startGameBtn.addEventListener('click', () => {
+      requestMotionPermission(); // must be the first thing in the tap on iPhone
+      unlockAudio();
+      keepScreenAwake();
+      store.del('hitster-setup', sessionStorage);
+      setupScreen.classList.add('hidden');
+      gameScreen.classList.remove('hidden');
+      updateTurnDisplay();
+      if (source === 'spotify') getDeviceId().catch(() => {});
+      prepareNextSong();
+    });
+
+    function unlockAudio() {
+      audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+      audio.play().then(() => audio.pause()).catch(() => {});
+    }
+
+    async function keepScreenAwake() {
+      try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {}
+    }
+
+    function updateTurnDisplay() {
+      $('current-player').textContent = players[currentPlayerIndex].name;
+    }
+
+    // ---------- 5. Apple previews ----------
+    function itunesSearch(term) {
+      return new Promise((resolve, reject) => {
+        const cb = 'itcb_' + Date.now() + Math.random().toString(36).slice(2);
+        const script = document.createElement('script');
+        const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, 8000);
+        function cleanup() { clearTimeout(timer); delete window[cb]; script.remove(); }
+        window[cb] = data => { cleanup(); resolve(data); };
+        script.onerror = () => { cleanup(); reject(new Error('network')); };
+        const country = $('country-select').value;
+        script.src = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=music&entity=song&limit=15&country=${country}&callback=${cb}`;
+        document.head.appendChild(script);
+      });
+    }
+
+    const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
+
+    function cleanTitle(t) {
+      return String(t)
+        .replace(/\s+-\s+.*(remaster|mono|stereo|version|edit|mix|live|single|deluxe|anniversary).*$/i, '')
+        .replace(/\s*[\(\[][^\)\]]*(feat|ft\.|with |remaster|version|edit|mix|mono|stereo)[^\)\]]*[\)\]]/gi, '')
+        .trim();
+    }
+
+    async function findPreview(song) {
+      const title = cleanTitle(song.title);
+      const data = await itunesSearch(`${song.firstArtist} ${title}`);
+      const wantTitle = norm(title), wantArtist = norm(song.firstArtist);
+      let best = null, bestScore = 0;
+      for (const r of (data.results || [])) {
+        if (!r.previewUrl) continue;
+        const gotTitle = norm(cleanTitle(r.trackName));
+        const gotArtist = norm(r.artistName);
+        const titleMatch = gotTitle === wantTitle ||
+          (wantTitle.length >= 3 && (gotTitle.startsWith(wantTitle) || wantTitle.startsWith(gotTitle)));
+        if (!titleMatch) continue;
+        const score = 2 + ((gotArtist.includes(wantArtist) || wantArtist.includes(gotArtist)) ? 1 : 0);
+        if (score > bestScore) { best = r; bestScore = score; }
+      }
+      if (!best) return null;
+      return Object.assign({}, song, {
+        year: song.year || extractYear(best.releaseDate) || '????',
+        preview: best.previewUrl,
+        art: best.artworkUrl100 ? best.artworkUrl100.replace('100x100bb', '300x300bb') : null
+      });
+    }
+
+    // ---------- 6. Prepare next song ----------
+    async function prepareNextSong() {
+      if (preparing || nextSong) return;
+      preparing = true;
+      readyStatus.textContent = 'Finding the next song…';
+
+      if (source === 'spotify') {
+        const pool = songList.filter(s => s.uri);
+        if (pool.length) {
+          const pick = pool[Math.floor(Math.random() * pool.length)];
+          songList.splice(songList.indexOf(pick), 1);
+          nextSong = Object.assign({}, pick, { year: pick.year || '????' });
+        }
+      } else {
+        let misses = 0;
+        while (songList.length > 0 && !nextSong) {
+          const song = songList.splice(Math.floor(Math.random() * songList.length), 1)[0];
+          try {
+            const found = await findPreview(song);
+            if (found) nextSong = found;
+          } catch (e) {
+            if (++misses >= 3) { readyStatus.textContent = "Can't reach the music service. Check the internet connection."; preparing = false; return; }
+          }
+        }
+        if (nextSong && gameState !== 'playing') {
+          audio.src = nextSong.preview;   // start downloading now so the flip plays instantly
+          audio.load();
+        }
+      }
+
+      preparing = false;
+      if (nextSong) {
+        readyStatus.textContent = 'Ready! Flip down or tap Play.';
+        if (nextSong.art) new Image().src = nextSong.art;
+        if (isFaceDown && gameState === 'idle') startSongPlayback();
+      } else {
+        readyStatus.textContent = 'No more songs left. Check the scores!';
+      }
+    }
+
+    // ---------- 7. Flip detection (gravity-based) ----------
+    const sensorStatus = $('sensor-status');
+    let faceUpSign = 0, gotMotion = false, pendingPose = null, poseSince = 0;
+    const HOLD_MS = 200;
+
+    function requestMotionPermission() {
+      if (!window.isSecureContext) { sensorStatus.textContent = 'Motion sensor: needs an https:// address (e.g. GitHub Pages). Use the buttons.'; return; }
+      if (typeof DeviceMotionEvent === 'undefined') { sensorStatus.textContent = 'Motion sensor: not available on this device. Use the buttons.'; return; }
+      if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        DeviceMotionEvent.requestPermission().then(state => {
+          if (state === 'granted') startMotion();
+          else sensorStatus.textContent = 'Motion sensor: permission denied. Close the tab, reopen and tap Allow.';
+        }).catch(() => { sensorStatus.textContent = "Motion sensor: couldn't ask for permission. Use the buttons."; });
+      } else {
+        startMotion();
+      }
+    }
+
+    function startMotion() {
+      window.addEventListener('devicemotion', handleMotion);
+      sensorStatus.textContent = 'Motion sensor: waiting for data…';
+      setTimeout(() => { if (!gotMotion) sensorStatus.textContent = 'Motion sensor: no data coming through. Use the buttons.'; }, 3000);
+    }
+
+    function handleMotion(e) {
+      const g = e.accelerationIncludingGravity;
+      if (!g || g.z === null) return;
+      gotMotion = true;
+      const z = g.z;
+
+      if (!faceUpSign) {
+        if (Math.abs(z) > 4) { faceUpSign = Math.sign(z); sensorStatus.textContent = 'Motion sensor: active ✓'; }
+        else sensorStatus.textContent = 'Motion sensor: tilt the screen towards you to set up…';
+        return;
+      }
+
+      const up = z * faceUpSign;
+      let pose = null;
+      if (up < -6) pose = 'down';
+      else if (up > 2) pose = 'up';
+
+      if (pose !== pendingPose) { pendingPose = pose; poseSince = Date.now(); return; }
+      if (!pose || Date.now() - poseSince < HOLD_MS) return;
+
+      isFaceDown = pose === 'down';
+      if (pose === 'down' && gameState === 'idle') startSongPlayback();
+      else if (pose === 'up' && gameState === 'playing') revealSongDetails();
+    }
+
+    // ---------- 8. Game loop ----------
+    function startSongPlayback() {
+      if (!nextSong) return;
+      gameState = 'playing';
+      currentSong = nextSong;
+      nextSong = null;
+
+      stateIdle.classList.add('hidden');
+      stateRevealed.classList.add('hidden');
+      statePlaying.classList.remove('hidden');
+      scoreActions.classList.add('hidden');
+      playCurrent();
+    }
+
+    function showPlayError(msg) {
+      playError.textContent = msg;
+      playError.classList.toggle('hidden', !msg);
+    }
+
+    function playCurrent() {
+      showPlayError('');
+      if (source === 'spotify') {
+        spotifyPlay(currentSong.uri).catch(err => showPlayError(err.message));
+      } else {
+        if (!audio.src.includes(currentSong.preview)) audio.src = currentSong.preview;
+        audio.currentTime = 0;
+        audio.play().catch(() => showPlayError('Your phone blocked autoplay. Tap Play from the start.'));
+      }
+    }
+
+    $('replay-btn').addEventListener('click', playCurrent);
+
+    function revealSongDetails() {
+      gameState = 'revealed';
+      if (source === 'spotify') spotifyPause(); else audio.pause();
+
+      $('revealed-title').textContent = currentSong.title;
+      $('revealed-artist').textContent = currentSong.artist;
+      $('revealed-year').textContent = currentSong.year;
+      const art = $('revealed-art');
+      if (currentSong.art) { art.src = currentSong.art; art.classList.remove('hidden'); }
+      else art.classList.add('hidden');
+
+      statePlaying.classList.add('hidden');
+      stateRevealed.classList.remove('hidden');
+      scoreActions.classList.remove('hidden');
+      prepareNextSong();
+    }
+
+    $('score-correct-btn').addEventListener('click', () => { players[currentPlayerIndex].score += 1; nextTurn(); });
+    $('score-wrong-btn').addEventListener('click', nextTurn);
+
+    function nextTurn() {
+      currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
+      gameState = 'idle';
+      updateTurnDisplay();
+      renderPlayers();
+      stateRevealed.classList.add('hidden');
+      statePlaying.classList.add('hidden');
+      stateIdle.classList.remove('hidden');
+      scoreActions.classList.add('hidden');
+      if (nextSong) readyStatus.textContent = 'Ready! Flip down or tap Play.';
+      else prepareNextSong();
+    }
+
+    $('manual-play-btn').addEventListener('click', () => { if (gameState === 'idle') startSongPlayback(); });
+    $('manual-reveal-btn').addEventListener('click', () => { if (gameState === 'playing') revealSongDetails(); });
+    $('scoreboard-toggle').addEventListener('click', () => { renderPlayers(); $('scoreboard-drawer').classList.toggle('hidden'); });
+
+    // ---------- On load ----------
+    (function init() {
+      $('client-id').value = store.get('hitster-client-id') || '';
+      const saved = store.get('hitster-setup', sessionStorage);
+      if (saved) {
+        songList = saved.songList || [];
+        players = saved.players || [];
+        renderPlayers();
+        showSongCount();
+      }
+      setSource(store.get('hitster-source') || 'spotify');
+      updateSpotifyStatus();
+      finishSpotifyLogin();
+    })();
+  </script>
+</body>
+</html>
