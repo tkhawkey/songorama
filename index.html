@@ -6,6 +6,7 @@
   <title>Hitster DIY Game</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
+    html, body { overflow-x: hidden; }
     body { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
     /* iPhone Safari can block typing in fields that inherit user-select: none */
     input, select, textarea { -webkit-user-select: text; user-select: text; }
@@ -93,7 +94,7 @@
           <summary class="cursor-pointer">Redirect URI for your Spotify app</summary>
           <code id="redirect-uri" class="block mt-1 break-all text-emerald-300 select-all"></code>
         </details>
-        <p class="text-[11px] text-slate-400">Before starting, open Spotify on this phone or a speaker and play anything for a moment so it shows up as a device.</p>
+        <p class="text-[11px] text-slate-400">Before starting, play any song in the Spotify app and leave it playing, then switch back here. If Spotify is paused, your phone may go to sleep as a device.</p>
       </div>
     </div>
 
@@ -101,7 +102,7 @@
   </div>
 
   <!-- GAME SCREEN -->
-  <div id="game-screen" class="hidden min-h-screen flex-1 flex flex-col justify-between p-6">
+  <div id="game-screen" class="hidden min-h-screen flex-1 flex flex-col justify-between p-6 w-full max-w-md mx-auto">
     <div class="flex justify-between items-start bg-slate-800/80 p-4 rounded-xl backdrop-blur">
       <div>
         <p class="text-xs uppercase tracking-wider text-slate-400">Current Turn</p>
@@ -129,6 +130,7 @@
           <h2 class="text-2xl font-bold text-amber-400">Song is Playing!</h2>
           <p class="text-sm text-slate-400">Place the song on your timeline.<br/>Flip phone face-up to reveal the answer.</p>
           <p id="play-error" class="hidden text-sm text-rose-300"></p>
+          <a id="open-spotify-link" href="spotify:" class="hidden inline-block mt-1 px-5 py-3 bg-[#1DB954] text-slate-950 text-sm font-bold rounded-xl">Open Spotify</a>
           <button id="replay-btn" class="mt-2 px-5 py-3 bg-slate-700 text-slate-100 text-sm font-semibold rounded-xl">▶ Play from the start</button>
         </div>
 
@@ -385,31 +387,45 @@
     }
 
     let cachedDeviceId = null;
-    async function getDeviceId() {
+    async function getDevices() {
       const res = await spotifyFetch('/me/player/devices');
       if (!res.ok) throw new Error(explainStatus(res.status, 'checking devices'));
-      const { devices = [] } = await res.json();
-      const usable = devices.filter(d => !d.is_restricted);
-      const pick = usable.find(d => d.is_active) || usable.find(d => d.type === 'Smartphone') || usable[0];
-      cachedDeviceId = pick ? pick.id : null;
+      const data = await res.json();
+      return (data.devices || []).filter(d => !d.is_restricted);
+    }
+    const pickDevice = devs => devs.find(d => d.is_active) || devs.find(d => d.type === 'Smartphone') || devs[0] || null;
+
+    async function getDeviceId() {
+      const d = pickDevice(await getDevices());
+      cachedDeviceId = d ? d.id : null;
       return cachedDeviceId;
     }
 
     async function spotifyPlay(uri) {
       const body = JSON.stringify({ uris: [uri], position_ms: 0 });
-      const playOn = id => spotifyFetch('/me/player/play' + (id ? '?device_id=' + encodeURIComponent(id) : ''), { method: 'PUT', body });
-      let deviceId = cachedDeviceId || await getDeviceId();
-      let res = await playOn(deviceId);   // no device id = "whatever is active"
-      if (res.ok) return;
-      if (deviceId) {                     // device may have gone to sleep: look again
-        cachedDeviceId = null;
-        res = await playOn(await getDeviceId());
+      const playOn = id => spotifyFetch('/me/player/play?device_id=' + encodeURIComponent(id), { method: 'PUT', body });
+
+      if (cachedDeviceId) {
+        const res = await playOn(cachedDeviceId);
         if (res.ok) return;
+        cachedDeviceId = null;   // device may have gone to sleep; look again below
       }
+
+      const device = pickDevice(await getDevices());
+      if (!device) throw new Error("Spotify can't see any of your devices. Tap Open Spotify, start any song, come back here and tap Play from the start.");
+
+      if (!device.is_active) {
+        // Make it the playback device first; sleeping phones often ignore a direct play command
+        await spotifyFetch('/me/player', { method: 'PUT', body: JSON.stringify({ device_ids: [device.id], play: false }) });
+        await new Promise(r => setTimeout(r, 700));
+      }
+
+      const res = await playOn(device.id);
+      if (res.ok) { cachedDeviceId = device.id; return; }
+      if (res.status === 404) throw new Error('Spotify can see "' + device.name + '" but it won\'t start. Tap Open Spotify, start any song, come back and tap Play from the start.');
       throw new Error(explainStatus(res.status, 'starting the song'));
     }
 
-    function spotifyPause() { spotifyFetch('/me/player/pause', { method: 'PUT' }).catch(() => {}); }
 
     $('spotify-test-btn').addEventListener('click', async () => {
       updateSpotifyStatus('Checking…');
@@ -602,6 +618,7 @@
     function showPlayError(msg) {
       playError.textContent = msg;
       playError.classList.toggle('hidden', !msg);
+      $('open-spotify-link').classList.toggle('hidden', !msg || source !== 'spotify');
     }
 
     function playCurrent() {
@@ -619,7 +636,9 @@
 
     function revealSongDetails() {
       gameState = 'revealed';
-      if (source === 'spotify') spotifyPause(); else audio.pause();
+      // Spotify keeps playing through the reveal: pausing lets Android put the Spotify app
+      // to sleep, and then the next song can't start. The next turn replaces the song.
+      if (source !== 'spotify') audio.pause();
 
       $('revealed-title').textContent = currentSong.title;
       $('revealed-artist').textContent = currentSong.artist;
