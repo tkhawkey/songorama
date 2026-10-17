@@ -7,6 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { touch-action: manipulation; user-select: none; }
+    .source-btn.selected { border-color: #34d399; background: rgba(16,185,129,0.15); }
   </style>
 </head>
 <body class="bg-slate-900 text-white min-h-screen flex flex-col font-sans">
@@ -35,21 +36,45 @@
       <ul id="player-list" class="space-y-1 text-sm text-slate-300"></ul>
     </div>
 
-    <!-- Preview region -->
-    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-2">
-      <label for="country-select" class="block text-sm font-semibold text-slate-300">3. Music store region</label>
-      <select id="country-select" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm">
-        <option value="GB">United Kingdom</option>
-        <option value="US">United States</option>
-        <option value="IE">Ireland</option>
-        <option value="ES">Spain</option>
-        <option value="PT">Portugal</option>
-        <option value="FR">France</option>
-        <option value="DE">Germany</option>
-        <option value="IT">Italy</option>
-        <option value="NL">Netherlands</option>
-      </select>
-      <p class="text-[11px] text-slate-400">Songs play as 30-second previews. No Spotify login needed. Songs with no preview are skipped automatically.</p>
+    <!-- Music source -->
+    <div class="bg-slate-800 p-4 rounded-xl border border-slate-700 space-y-3">
+      <label class="block text-sm font-semibold text-slate-300">3. Music source</label>
+      <div class="grid grid-cols-2 gap-2">
+        <button data-source="spotify" class="source-btn text-left p-3 rounded-lg border border-slate-600 bg-slate-900">
+          <span class="block font-bold text-sm">Spotify Premium</span>
+          <span class="block text-[11px] text-slate-400">Full song from the start</span>
+        </button>
+        <button data-source="apple" class="source-btn text-left p-3 rounded-lg border border-slate-600 bg-slate-900">
+          <span class="block font-bold text-sm">Apple previews</span>
+          <span class="block text-[11px] text-slate-400">30s clip, no login</span>
+        </button>
+      </div>
+
+      <div id="apple-settings" class="hidden space-y-2">
+        <label for="country-select" class="block text-xs text-slate-400">Music store region</label>
+        <select id="country-select" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm">
+          <option value="GB">United Kingdom</option>
+          <option value="US">United States</option>
+          <option value="IE">Ireland</option>
+          <option value="ES">Spain</option>
+          <option value="PT">Portugal</option>
+          <option value="FR">France</option>
+          <option value="DE">Germany</option>
+          <option value="IT">Italy</option>
+          <option value="NL">Netherlands</option>
+        </select>
+      </div>
+
+      <div id="spotify-settings" class="hidden space-y-2">
+        <input type="text" id="client-id" placeholder="Spotify Client ID" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs" autocomplete="off"/>
+        <button id="spotify-login-btn" class="w-full py-2 bg-[#1DB954] text-slate-950 font-bold rounded-lg text-sm">Log in with Spotify</button>
+        <p id="spotify-status" class="text-xs text-slate-400">Not logged in.</p>
+        <details class="text-[11px] text-slate-400">
+          <summary class="cursor-pointer">Redirect URI for your Spotify app</summary>
+          <code id="redirect-uri" class="block mt-1 break-all text-emerald-300 select-all"></code>
+        </details>
+        <p class="text-[11px] text-slate-400">Before starting, open Spotify on this phone or a speaker and play anything for a moment so it shows up as a device.</p>
+      </div>
     </div>
 
     <button id="start-game-btn" class="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-lg shadow-lg disabled:opacity-50" disabled>Start Game</button>
@@ -73,23 +98,21 @@
     <div id="interaction-zone" class="my-auto text-center py-10 space-y-6">
       <div id="status-card" class="bg-slate-800/50 border-2 border-dashed border-slate-700 rounded-3xl p-8 flex flex-col items-center justify-center min-h-[250px]">
 
-        <!-- State A: Idle -->
         <div id="state-idle" class="space-y-3">
           <div class="text-5xl mb-2">📱</div>
           <h2 class="text-2xl font-bold">Flip phone face-down</h2>
           <p id="ready-status" class="text-sm text-slate-400">Finding the next song…</p>
         </div>
 
-        <!-- State B: Playing -->
         <div id="state-playing" class="hidden space-y-3">
           <div class="animate-pulse text-5xl mb-2">🎵</div>
           <h2 class="text-2xl font-bold text-amber-400">Song is Playing!</h2>
           <p class="text-sm text-slate-400">Place the song on your timeline.<br/>Flip phone face-up to reveal the answer.</p>
+          <p id="play-error" class="hidden text-sm text-rose-300"></p>
           <button id="tap-to-play-btn" class="hidden mt-2 px-6 py-3 bg-amber-400 text-slate-950 font-bold rounded-xl">▶ Tap to play</button>
           <button id="replay-btn" class="mt-2 px-4 py-2 bg-slate-700 text-slate-200 text-sm rounded-lg">↺ Replay</button>
         </div>
 
-        <!-- State C: Revealed -->
         <div id="state-revealed" class="hidden space-y-4 flex flex-col items-center">
           <img id="revealed-art" alt="" class="hidden w-32 h-32 rounded-xl shadow-lg object-cover"/>
           <span id="revealed-year" class="inline-block bg-emerald-500/20 text-emerald-300 font-extrabold text-4xl px-4 py-2 rounded-xl border border-emerald-500/30">1999</span>
@@ -120,11 +143,12 @@
     // ---------- State ----------
     let songList = [];
     let players = [];
+    let source = 'spotify';     // 'spotify' | 'apple'
     let currentPlayerIndex = 0;
-    let currentSong = null;   // { title, artist, year, preview, art }
-    let nextSong = null;      // prepared in advance
+    let currentSong = null;
+    let nextSong = null;
     let preparing = false;
-    let gameState = 'idle';   // 'idle' | 'playing' | 'revealed'
+    let gameState = 'idle';     // 'idle' | 'playing' | 'revealed'
     let isFaceDown = false;
     const audio = new Audio();
     audio.preload = 'auto';
@@ -134,11 +158,16 @@
     const startGameBtn = $('start-game-btn');
     const stateIdle = $('state-idle'), statePlaying = $('state-playing'), stateRevealed = $('state-revealed');
     const readyStatus = $('ready-status'), scoreActions = $('score-actions');
-    const tapToPlayBtn = $('tap-to-play-btn');
+    const tapToPlayBtn = $('tap-to-play-btn'), playError = $('play-error');
 
     const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const store = {
+      get(k, area = localStorage) { try { return JSON.parse(area.getItem(k)); } catch (e) { return null; } },
+      set(k, v, area = localStorage) { try { area.setItem(k, JSON.stringify(v)); } catch (e) {} },
+      del(k, area = localStorage) { try { area.removeItem(k); } catch (e) {} }
+    };
 
-    // ---------- 1. Load playlist (CSV or JSON) ----------
+    // ---------- 1. Playlist ----------
     $('playlist-input').addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -153,12 +182,11 @@
               title: item["Track Name"] || item.title || item.name || "",
               artist: String(artistRaw).replace(/;/g, ', '),
               firstArtist: String(artistRaw).split(/;/)[0].trim(),
-              year: extractYear(item["Album Release Date"] || item.year || item.release_date)
+              year: extractYear(item["Album Release Date"] || item.year || item.release_date),
+              uri: item["Track URI"] || item.uri || item.spotify_uri || ""
             };
           }).filter(s => s.title && s.artist);
-
-          $('count-num').textContent = songList.length;
-          $('song-count').classList.remove('hidden');
+          showSongCount();
           checkReadyToStart();
         } catch (err) {
           alert("Couldn't read that file. Use the CSV straight from Exportify, or a JSON list of songs.");
@@ -166,6 +194,11 @@
       };
       reader.readAsText(file);
     });
+
+    function showSongCount() {
+      $('count-num').textContent = songList.length;
+      $('song-count').classList.toggle('hidden', songList.length === 0);
+    }
 
     function parseCSV(text) {
       const rows = []; let row = [], field = '', inQuotes = false;
@@ -210,23 +243,165 @@
       $('scores-list').innerHTML = html;
     }
 
-    function checkReadyToStart() {
-      startGameBtn.disabled = !(songList.length > 0 && players.length > 0);
+    // ---------- 3. Music source ----------
+    document.querySelectorAll('.source-btn').forEach(btn => {
+      btn.addEventListener('click', () => setSource(btn.dataset.source));
+    });
+
+    function setSource(s) {
+      source = s;
+      document.querySelectorAll('.source-btn').forEach(b => b.classList.toggle('selected', b.dataset.source === s));
+      $('apple-settings').classList.toggle('hidden', s !== 'apple');
+      $('spotify-settings').classList.toggle('hidden', s !== 'spotify');
+      store.set('hitster-source', s);
+      checkReadyToStart();
     }
 
-    // ---------- 3. Start ----------
+    function checkReadyToStart() {
+      let ok = songList.length > 0 && players.length > 0;
+      if (source === 'spotify') ok = ok && !!spotifyAuth() && songList.some(s => s.uri);
+      startGameBtn.disabled = !ok;
+    }
+
+    // ---------- Spotify login (PKCE, no server needed) ----------
+    const SCOPES = 'user-modify-playback-state user-read-playback-state';
+    const redirectUri = location.origin + location.pathname;
+    $('redirect-uri').textContent = redirectUri;
+
+    const spotifyAuth = () => store.get('hitster-spotify');
+
+    function updateSpotifyStatus(msg) {
+      const auth = spotifyAuth();
+      $('spotify-status').textContent = msg || (auth ? 'Logged in ✓' : 'Not logged in.');
+      $('spotify-login-btn').textContent = auth ? 'Log in again' : 'Log in with Spotify';
+    }
+
+    const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+    $('spotify-login-btn').addEventListener('click', async () => {
+      const clientId = $('client-id').value.trim();
+      if (!clientId) { updateSpotifyStatus('Paste your Client ID first.'); return; }
+      if (!window.isSecureContext) { updateSpotifyStatus('Spotify login needs an https:// address (e.g. GitHub Pages).'); return; }
+      store.set('hitster-client-id', clientId);
+
+      const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
+      const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+      store.set('hitster-pkce', verifier, sessionStorage);
+      // keep the setup so the redirect doesn't wipe it
+      store.set('hitster-setup', { songList, players }, sessionStorage);
+
+      const params = new URLSearchParams({
+        response_type: 'code', client_id: clientId, scope: SCOPES,
+        code_challenge_method: 'S256', code_challenge: challenge, redirect_uri: redirectUri
+      });
+      location.href = 'https://accounts.spotify.com/authorize?' + params;
+    });
+
+    async function finishSpotifyLogin() {
+      const params = new URLSearchParams(location.search);
+      if (!params.has('code') && !params.has('error')) return;
+      history.replaceState(null, '', redirectUri);
+      if (params.has('error')) { updateSpotifyStatus('Login cancelled or refused: ' + params.get('error')); return; }
+
+      const clientId = store.get('hitster-client-id');
+      const verifier = store.get('hitster-pkce', sessionStorage);
+      try {
+        const res = await fetch('https://accounts.spotify.com/api/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code', code: params.get('code'),
+            redirect_uri: redirectUri, client_id: clientId, code_verifier: verifier
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error_description || data.error);
+        saveTokens(data, clientId);
+        updateSpotifyStatus();
+      } catch (err) {
+        updateSpotifyStatus('Login failed: ' + err.message);
+      }
+      checkReadyToStart();
+    }
+
+    function saveTokens(data, clientId) {
+      const old = spotifyAuth() || {};
+      store.set('hitster-spotify', {
+        clientId,
+        access: data.access_token,
+        refresh: data.refresh_token || old.refresh,
+        expiresAt: Date.now() + (data.expires_in - 60) * 1000
+      });
+    }
+
+    async function getToken() {
+      const auth = spotifyAuth();
+      if (!auth) throw new Error('Not logged in to Spotify.');
+      if (Date.now() < auth.expiresAt) return auth.access;
+      const res = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: auth.refresh, client_id: auth.clientId })
+      });
+      const data = await res.json();
+      if (!res.ok) { store.del('hitster-spotify'); throw new Error('Spotify login expired. Go back and log in again.'); }
+      saveTokens(data, auth.clientId);
+      return data.access_token;
+    }
+
+    async function spotifyFetch(path, opts = {}) {
+      const token = await getToken();
+      return fetch('https://api.spotify.com/v1' + path, {
+        ...opts,
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', ...(opts.headers || {}) }
+      });
+    }
+
+    let cachedDeviceId = null;
+    async function getDeviceId() {
+      const res = await spotifyFetch('/me/player/devices');
+      if (!res.ok) return null;
+      const { devices = [] } = await res.json();
+      const usable = devices.filter(d => !d.is_restricted);
+      const pick = usable.find(d => d.is_active) || usable.find(d => d.type === 'Smartphone') || usable[0];
+      cachedDeviceId = pick ? pick.id : null;
+      return cachedDeviceId;
+    }
+
+    async function spotifyPlay(uri) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const deviceId = cachedDeviceId || await getDeviceId();
+        if (!deviceId) throw new Error('No Spotify device found. Open the Spotify app, play anything for a second, then tap below.');
+        const res = await spotifyFetch('/me/player/play?device_id=' + encodeURIComponent(deviceId), {
+          method: 'PUT', body: JSON.stringify({ uris: [uri], position_ms: 0 })
+        });
+        if (res.ok || res.status === 204) return;
+        cachedDeviceId = null;  // device may have gone to sleep; look again
+        if (attempt === 1) {
+          let msg = 'Spotify refused to play (' + res.status + ').';
+          if (res.status === 403) msg = 'Spotify refused: check this account is Premium and is on your app\'s user list.';
+          if (res.status === 404) msg = 'Spotify device went to sleep. Open the Spotify app, then tap below.';
+          throw new Error(msg);
+        }
+      }
+    }
+
+    function spotifyPause() { spotifyFetch('/me/player/pause', { method: 'PUT' }).catch(() => {}); }
+
+    // ---------- 4. Start ----------
     startGameBtn.addEventListener('click', () => {
       requestMotionPermission(); // must be the first thing in the tap on iPhone
-      unlockAudio();             // must happen inside a tap, or phones block later playback
+      unlockAudio();
       keepScreenAwake();
+      store.del('hitster-setup', sessionStorage);
       setupScreen.classList.add('hidden');
       gameScreen.classList.remove('hidden');
       updateTurnDisplay();
+      if (source === 'spotify') getDeviceId().catch(() => {});
       prepareNextSong();
     });
 
     function unlockAudio() {
-      // A tiny silent clip played during a user tap "unlocks" this audio element on iOS/Android
       audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
       audio.play().then(() => audio.pause()).catch(() => {});
     }
@@ -239,7 +414,7 @@
       $('current-player').textContent = players[currentPlayerIndex].name;
     }
 
-    // ---------- 4. Find previews (iTunes Search, no login) ----------
+    // ---------- 5. Apple previews ----------
     function itunesSearch(term) {
       return new Promise((resolve, reject) => {
         const cb = 'itcb_' + Date.now() + Math.random().toString(36).slice(2);
@@ -274,72 +449,72 @@
         const gotArtist = norm(r.artistName);
         const titleMatch = gotTitle === wantTitle ||
           (wantTitle.length >= 3 && (gotTitle.startsWith(wantTitle) || wantTitle.startsWith(gotTitle)));
-        if (!titleMatch) continue;  // never play a different song
-        const artistMatch = gotArtist.includes(wantArtist) || wantArtist.includes(gotArtist);
-        const score = 2 + (artistMatch ? 1 : 0);
+        if (!titleMatch) continue;
+        const score = 2 + ((gotArtist.includes(wantArtist) || wantArtist.includes(gotArtist)) ? 1 : 0);
         if (score > bestScore) { best = r; bestScore = score; }
       }
       if (!best) return null;
       return {
-        title: song.title,
-        artist: song.artist,
+        ...song,
         year: song.year || extractYear(best.releaseDate) || '????',
         preview: best.previewUrl,
         art: best.artworkUrl100 ? best.artworkUrl100.replace('100x100bb', '300x300bb') : null
       };
     }
 
+    // ---------- 6. Prepare next song ----------
     async function prepareNextSong() {
       if (preparing || nextSong) return;
       preparing = true;
       readyStatus.textContent = 'Finding the next song…';
-      let misses = 0;
-      while (songList.length > 0 && !nextSong) {
-        const song = songList.splice(Math.floor(Math.random() * songList.length), 1)[0];
-        try {
-          const found = await findPreview(song);
-          if (found) { nextSong = found; break; }
-        } catch (e) {
-          misses++;
-          if (misses >= 3) { readyStatus.textContent = "Can't reach the music service. Check the internet connection."; preparing = false; return; }
+
+      if (source === 'spotify') {
+        const pool = songList.filter(s => s.uri);
+        if (pool.length) {
+          const pick = pool[Math.floor(Math.random() * pool.length)];
+          songList.splice(songList.indexOf(pick), 1);
+          nextSong = { ...pick, year: pick.year || '????' };
+        }
+      } else {
+        let misses = 0;
+        while (songList.length > 0 && !nextSong) {
+          const song = songList.splice(Math.floor(Math.random() * songList.length), 1)[0];
+          try {
+            const found = await findPreview(song);
+            if (found) nextSong = found;
+          } catch (e) {
+            if (++misses >= 3) { readyStatus.textContent = "Can't reach the music service. Check the internet connection."; preparing = false; return; }
+          }
+        }
+        if (nextSong && gameState !== 'playing') {
+          audio.src = nextSong.preview;   // start downloading now so the flip plays instantly
+          audio.load();
         }
       }
+
       preparing = false;
       if (nextSong) {
         readyStatus.textContent = 'Ready! Flip down or tap Play.';
-        new Image().src = nextSong.art || '';
+        if (nextSong.art) new Image().src = nextSong.art;
         if (isFaceDown && gameState === 'idle') startSongPlayback();
       } else {
         readyStatus.textContent = 'No more songs left. Check the scores!';
       }
     }
 
-    // ---------- 5. Flip detection (gravity-based) ----------
-    // Reads which way gravity points through the screen. Phones disagree on the
-    // sign, so the first clear reading (taken while you're looking at the screen
-    // after tapping Start) is treated as "face up".
+    // ---------- 7. Flip detection (gravity-based) ----------
     const sensorStatus = $('sensor-status');
-    let faceUpSign = 0;          // +1 or -1 once calibrated
-    let gotMotion = false;
-    let pendingPose = null, poseSince = 0;
-    const HOLD_MS = 350;         // pose must be held this long (ignores mid-flip)
+    let faceUpSign = 0, gotMotion = false, pendingPose = null, poseSince = 0;
+    const HOLD_MS = 200;
 
     function requestMotionPermission() {
-      if (!window.isSecureContext) {
-        sensorStatus.textContent = 'Motion sensor: needs an https:// address (e.g. GitHub Pages). Use the buttons.';
-        return;
-      }
-      if (typeof DeviceMotionEvent === 'undefined') {
-        sensorStatus.textContent = 'Motion sensor: not available on this device. Use the buttons.';
-        return;
-      }
+      if (!window.isSecureContext) { sensorStatus.textContent = 'Motion sensor: needs an https:// address (e.g. GitHub Pages). Use the buttons.'; return; }
+      if (typeof DeviceMotionEvent === 'undefined') { sensorStatus.textContent = 'Motion sensor: not available on this device. Use the buttons.'; return; }
       if (typeof DeviceMotionEvent.requestPermission === 'function') {
         DeviceMotionEvent.requestPermission().then(state => {
           if (state === 'granted') startMotion();
           else sensorStatus.textContent = 'Motion sensor: permission denied. Close the tab, reopen and tap Allow.';
-        }).catch(() => {
-          sensorStatus.textContent = "Motion sensor: couldn't ask for permission. Use the buttons.";
-        });
+        }).catch(() => { sensorStatus.textContent = "Motion sensor: couldn't ask for permission. Use the buttons."; });
       } else {
         startMotion();
       }
@@ -348,9 +523,7 @@
     function startMotion() {
       window.addEventListener('devicemotion', handleMotion);
       sensorStatus.textContent = 'Motion sensor: waiting for data…';
-      setTimeout(() => {
-        if (!gotMotion) sensorStatus.textContent = 'Motion sensor: no data coming through. Use the buttons.';
-      }, 3000);
+      setTimeout(() => { if (!gotMotion) sensorStatus.textContent = 'Motion sensor: no data coming through. Use the buttons.'; }, 3000);
     }
 
     function handleMotion(e) {
@@ -360,16 +533,12 @@
       const z = g.z;
 
       if (!faceUpSign) {
-        if (Math.abs(z) > 4) {
-          faceUpSign = Math.sign(z);
-          sensorStatus.textContent = 'Motion sensor: active ✓';
-        } else {
-          sensorStatus.textContent = 'Motion sensor: tilt the screen towards you to set up…';
-        }
+        if (Math.abs(z) > 4) { faceUpSign = Math.sign(z); sensorStatus.textContent = 'Motion sensor: active ✓'; }
+        else sensorStatus.textContent = 'Motion sensor: tilt the screen towards you to set up…';
         return;
       }
 
-      const up = z * faceUpSign;   // ~+9.8 flat face-up, ~-9.8 flat face-down
+      const up = z * faceUpSign;
       let pose = null;
       if (up < -6) pose = 'down';
       else if (up > 2) pose = 'up';
@@ -382,34 +551,46 @@
       else if (pose === 'up' && gameState === 'playing') revealSongDetails();
     }
 
-    // ---------- 6. Game loop ----------
+    // ---------- 8. Game loop ----------
     function startSongPlayback() {
       if (!nextSong) return;
       gameState = 'playing';
       currentSong = nextSong;
       nextSong = null;
 
-      audio.src = currentSong.preview;
-      tapToPlayBtn.classList.add('hidden');
-      audio.play().catch(() => tapToPlayBtn.classList.remove('hidden'));
-
       stateIdle.classList.add('hidden');
       stateRevealed.classList.add('hidden');
       statePlaying.classList.remove('hidden');
       scoreActions.classList.add('hidden');
+      playCurrent();
     }
 
-    tapToPlayBtn.addEventListener('click', () => {
-      audio.play().then(() => tapToPlayBtn.classList.add('hidden')).catch(() => {});
-    });
+    function showPlayError(msg) {
+      playError.textContent = msg;
+      playError.classList.toggle('hidden', !msg);
+      tapToPlayBtn.classList.toggle('hidden', !msg);
+    }
+
+    function playCurrent() {
+      showPlayError('');
+      if (source === 'spotify') {
+        spotifyPlay(currentSong.uri).catch(err => showPlayError(err.message));
+      } else {
+        if (!audio.src.includes(currentSong.preview)) audio.src = currentSong.preview;
+        audio.currentTime = 0;
+        audio.play().catch(() => showPlayError('Your phone blocked autoplay.'));
+      }
+    }
+
+    tapToPlayBtn.addEventListener('click', playCurrent);
     $('replay-btn').addEventListener('click', () => {
-      audio.currentTime = 0;
-      audio.play().catch(() => {});
+      if (source === 'spotify') spotifyFetch('/me/player/seek?position_ms=0', { method: 'PUT' }).catch(() => {});
+      else { audio.currentTime = 0; audio.play().catch(() => {}); }
     });
 
     function revealSongDetails() {
       gameState = 'revealed';
-      audio.pause();
+      if (source === 'spotify') spotifyPause(); else audio.pause();
 
       $('revealed-title').textContent = currentSong.title;
       $('revealed-artist').textContent = currentSong.artist;
@@ -421,13 +602,10 @@
       statePlaying.classList.add('hidden');
       stateRevealed.classList.remove('hidden');
       scoreActions.classList.remove('hidden');
-      prepareNextSong();   // look up the next one while scores are given
+      prepareNextSong();
     }
 
-    $('score-correct-btn').addEventListener('click', () => {
-      players[currentPlayerIndex].score += 1;
-      nextTurn();
-    });
+    $('score-correct-btn').addEventListener('click', () => { players[currentPlayerIndex].score += 1; nextTurn(); });
     $('score-wrong-btn').addEventListener('click', nextTurn);
 
     function nextTurn() {
@@ -445,11 +623,22 @@
 
     $('manual-play-btn').addEventListener('click', () => { if (gameState === 'idle') startSongPlayback(); });
     $('manual-reveal-btn').addEventListener('click', () => { if (gameState === 'playing') revealSongDetails(); });
+    $('scoreboard-toggle').addEventListener('click', () => { renderPlayers(); $('scoreboard-drawer').classList.toggle('hidden'); });
 
-    $('scoreboard-toggle').addEventListener('click', () => {
-      renderPlayers();
-      $('scoreboard-drawer').classList.toggle('hidden');
-    });
+    // ---------- On load ----------
+    (function init() {
+      $('client-id').value = store.get('hitster-client-id') || '';
+      const saved = store.get('hitster-setup', sessionStorage);
+      if (saved) {
+        songList = saved.songList || [];
+        players = saved.players || [];
+        renderPlayers();
+        showSongCount();
+      }
+      setSource(store.get('hitster-source') || 'spotify');
+      updateSpotifyStatus();
+      finishSpotifyLogin();
+    })();
   </script>
 </body>
 </html>
