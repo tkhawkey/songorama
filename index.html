@@ -309,7 +309,16 @@
   .status.checked, .status.manual { color: var(--mint); }
   .status.flagged { color: var(--amber); }
   .status.excluded { color: #FF8A8A; }
-  .source-list { display: grid; gap: 8px; }
+  .source-list { display: grid; gap: 8px; max-height: 260px; overflow-y: auto; padding-right: 4px; }
+  .source-list.off { opacity: .4; pointer-events: none; }
+  .tag-mode { display: grid; gap: 6px; }
+  table.tags { width: 100%; border-collapse: separate; border-spacing: 0 6px; font-size: 15px; }
+  table.tags td { background: var(--bg-sunk); padding: 8px 10px; vertical-align: middle; }
+  table.tags td:first-child { border-radius: 12px 0 0 12px; font-weight: 700; }
+  table.tags td:last-child { border-radius: 0 12px 12px 0; text-align: right; }
+  table.tags .count { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  table.tags select { width: auto; display: inline-block; margin: 0; padding: 7px 10px; font-size: 14px; border-radius: 10px; }
+  .lib-grid.single { grid-template-columns: 1fr; margin-top: 18px; }
   .year-range { display: flex; gap: 10px; }
   .year-range label { flex: 1; }
   .fix-year { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -339,6 +348,11 @@
     <div class="panel">
       <h2>Songs</h2>
       <p id="lib-summary" class="hint">Loading the song library…</p>
+      <div class="tag-mode">
+        <label class="check"><input type="radio" name="tag-mode" value="all"> All songs in the library</label>
+        <label class="check"><input type="radio" name="tag-mode" value="any" checked> Songs with any ticked tag</label>
+        <label class="check"><input type="radio" name="tag-mode" value="every"> Only songs with every ticked tag</label>
+      </div>
       <div id="source-list" class="source-list"></div>
       <div class="year-range">
         <label>From year <input type="number" id="set-from" min="1900" max="2100" placeholder="Any"></label>
@@ -390,9 +404,10 @@
   <div class="lib-grid">
     <div class="panel">
       <h2>Add a playlist</h2>
-      <label>Name for this playlist <input type="text" id="import-name" placeholder="For example: NOW 1–125"></label>
+      <label>Tags for these songs <input type="text" id="import-name" placeholder="For example: NOW 1–10, NOW, 80s"></label>
+      <p class="hint" style="margin-top:-6px">Separate tags with commas. Every song in the file gets every tag. Songs already in the library keep their tags and gain these.</p>
       <label>Exportify CSV <input type="file" id="import-file" accept=".csv,.json"></label>
-      <p id="import-status" class="hint">Songs already in the library are merged, not added twice. The name becomes a filter on the game setup screen.</p>
+      <p id="import-status" class="hint"></p>
     </div>
     <div class="panel">
       <h2>Check years</h2>
@@ -401,6 +416,18 @@
       <p id="check-status" class="hint"></p>
       <ul id="check-log" class="check-log"></ul>
       <button id="check-btn" class="btn primary">Start checking years</button>
+    </div>
+  </div>
+
+  <div class="lib-grid single">
+    <div class="panel">
+      <h2>Tags</h2>
+      <p id="tags-empty" class="hint">Tags appear here once you add a playlist.</p>
+      <div class="table-wrap"><table class="tags"><tbody id="tag-rows"></tbody></table></div>
+      <div class="decoy-row" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button id="retidy-btn" class="btn small">Re-tidy all titles</button>
+        <span class="hint">Re-applies the latest rules for removing things like “- 2011 Remaster” and “(feat. …)”.</span>
+      </div>
     </div>
   </div>
 
@@ -864,7 +891,7 @@ var Library = (() => {
     return all;
   }
 
-  function changed() { renderStats(); if (L.onChange) L.onChange(); }
+  function changed() { renderStats(); renderTags(); if (L.onChange) L.onChange(); }
 
   function counts() {
     const c = { total: L.songs.length, checked: 0, flagged: 0, unchecked: 0, manual: 0, excluded: 0 };
@@ -872,14 +899,26 @@ var Library = (() => {
     return c;
   }
 
+  // Tags are stored in each song's "sources" list
   function sources() {
     const m = new Map();
     L.songs.forEach(s => (s.sources || []).forEach(n => m.set(n, (m.get(n) || 0) + 1)));
-    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], 'en', { numeric: true }));
+  }
+  function parseTags(text) {
+    const out = [];
+    String(text || '').split(',').map(t => t.trim().replace(/\s+/g, ' ')).filter(Boolean)
+      .forEach(t => { if (!out.some(o => o.toLowerCase() === t.toLowerCase())) out.push(t); });
+    return out;
+  }
+  // Use an existing tag's exact spelling if one matches, so "now" joins "NOW"
+  function matchExisting(tags) {
+    const known = sources().map(([n]) => n);
+    return tags.map(t => known.find(k => k.toLowerCase() === t.toLowerCase()) || t);
   }
 
   /* ---------- Importing an Exportify file ---------- */
-  async function importFile(file, sourceName) {
+  async function importFile(file, tags) {
     const status = $('import-status');
     status.textContent = 'Reading the file…';
     let rows;
@@ -903,7 +942,7 @@ var Library = (() => {
         }
         changes.set(k, row);
       }
-      if (!row.sources.includes(sourceName)) row.sources = row.sources.concat(sourceName);
+      tags.forEach(t => { if (!row.sources.includes(t)) row.sources = row.sources.concat(t); });
       if (!row.art && r.art) row.art = r.art;
       if (y && (!row.playlist_year || y < row.playlist_year)) {
         row.playlist_year = y;
@@ -922,9 +961,79 @@ var Library = (() => {
       if (error) { status.textContent = 'Saving stopped part-way: ' + error.message + '. Run it again to finish; nothing is added twice.'; await load(); return; }
     }
     await load();
-    status.innerHTML = `<span class="ok">${nf(added)} new songs added</span>, ${nf(merged)} already in the library and merged. ` +
+    status.innerHTML = `<span class="ok">${nf(added)} new songs added</span>, ${nf(merged)} already in the library gained the tag${tags.length === 1 ? '' : 's'} ${tags.map(t => '“' + esc(t) + '”').join(', ')}. ` +
       (added ? 'Press Start checking years to find their first-release years.' : '');
     renderReview();
+  }
+
+  /* ---------- Tag manager ---------- */
+  async function saveRows(rows, label) {
+    for (let i = 0; i < rows.length; i += 500) {
+      const { error } = await sb.from('songs').upsert(rows.slice(i, i + 500), { onConflict: 'song_key' });
+      if (error) { toast(label + ' stopped part-way: ' + error.message); break; }
+    }
+    await load();
+    renderReview();
+  }
+
+  function renderTags() {
+    const tags = sources();
+    $('tags-empty').hidden = tags.length > 0;
+    $('tag-rows').innerHTML = tags.map(([n, c]) => {
+      const only = L.songs.filter(s => s.sources && s.sources.length === 1 && s.sources[0] === n).length;
+      return `<tr data-tag="${esc(n)}"><td>${esc(n)}</td><td class="count">${nf(c)} songs${only ? ', ' + nf(only) + ' only here' : ''}</td>
+        <td><select aria-label="What to do with ${esc(n)}">
+          <option value="">Change…</option>
+          <option value="rename">Rename this tag</option>
+          <option value="add">Also give these songs another tag</option>
+          <option value="remove">Remove this tag (songs stay)</option>
+          <option value="delete">Delete songs that only have this tag</option>
+        </select></td></tr>`;
+    }).join('');
+  }
+
+  async function tagAction(tag, action) {
+    const tagged = L.songs.filter(s => (s.sources || []).includes(tag));
+    const now = new Date().toISOString();
+    if (action === 'rename') {
+      const raw = prompt(`Rename “${tag}” to:`, tag);
+      const to = raw && parseTags(raw)[0];
+      if (!to || to === tag) return;
+      const [target] = matchExisting([to]);
+      await saveRows(tagged.map(s => Object.assign({}, s, { updated_at: now,
+        sources: s.sources.filter(t => t !== tag).concat(s.sources.includes(target) ? [] : [target]) })), 'Renaming');
+    } else if (action === 'add') {
+      const raw = prompt(`Extra tags for the ${nf(tagged.length)} songs tagged “${tag}” (separate with commas):`, '');
+      const extra = matchExisting(parseTags(raw));
+      if (!extra.length) return;
+      await saveRows(tagged.map(s => Object.assign({}, s, { updated_at: now,
+        sources: s.sources.concat(extra.filter(t => !s.sources.includes(t))) })), 'Tagging');
+    } else if (action === 'remove') {
+      if (!confirm(`Remove the tag “${tag}” from ${nf(tagged.length)} songs? The songs stay in the library.`)) return;
+      await saveRows(tagged.map(s => Object.assign({}, s, { updated_at: now, sources: s.sources.filter(t => t !== tag) })), 'Removing the tag');
+    } else if (action === 'delete') {
+      const only = tagged.filter(s => s.sources.length === 1);
+      if (!only.length) { toast(`Every song tagged “${tag}” also has another tag, so nothing was deleted.`); return; }
+      const keep = tagged.length - only.length;
+      if (!confirm(`Delete ${nf(only.length)} songs that only have the tag “${tag}”?` + (keep ? ` ${nf(keep)} songs that also have other tags will stay and lose this tag.` : '') + ' This can’t be undone.')) return;
+      const keys = only.map(s => s.song_key);
+      for (let i = 0; i < keys.length; i += 150) {
+        const { error } = await sb.from('songs').delete().in('song_key', keys.slice(i, i + 150));
+        if (error) { toast('Deleting stopped part-way: ' + error.message); break; }
+      }
+      const shared = tagged.filter(s => s.sources.length > 1);
+      if (shared.length) await saveRows(shared.map(s => Object.assign({}, s, { updated_at: now, sources: s.sources.filter(t => t !== tag) })), 'Removing the tag');
+      else { await load(); renderReview(); }
+    }
+  }
+
+  async function retidy() {
+    const changedRows = L.songs.filter(s => Names.cleanTitle(s.title) !== s.title_clean)
+      .map(s => Object.assign({}, s, { title_clean: Names.cleanTitle(s.title), updated_at: new Date().toISOString() }));
+    if (!changedRows.length) { toast('All titles are already tidy.'); return; }
+    if (!confirm(`Update the tidy title of ${nf(changedRows.length)} songs?`)) return;
+    await saveRows(changedRows, 'Tidying');
+    toast(`${nf(changedRows.length)} titles updated.`);
   }
 
   /* ---------- Checking years with MusicBrainz ---------- */
@@ -1079,7 +1188,9 @@ var Library = (() => {
       if (opts.checkedOnly && !USABLE.includes(s.year_status)) return false;
       if (opts.from && !(s.year >= opts.from)) return false;
       if (opts.to && !(s.year <= opts.to)) return false;
-      if (opts.sources && opts.sources.length && !(s.sources || []).some(n => opts.sources.includes(n))) return false;
+      const tags = s.sources || [];
+      if (opts.tagMode === 'any' && !opts.tags.some(t => tags.includes(t))) return false;
+      if (opts.tagMode === 'every' && !(opts.tags.length && opts.tags.every(t => tags.includes(t)))) return false;
       return true;
     });
   }
@@ -1100,10 +1211,18 @@ var Library = (() => {
     $('import-file').addEventListener('change', e => {
       const f = e.target.files[0];
       if (!f) return;
-      const name = $('import-name').value.trim() || f.name.replace(/\.(csv|json)$/i, '').replace(/_/g, ' ');
-      importFile(f, name).then(() => { e.target.value = ''; });
+      let tags = parseTags($('import-name').value);
+      if (!tags.length) tags = [f.name.replace(/\.(csv|json)$/i, '').replace(/_/g, ' ')];
+      importFile(f, matchExisting(tags)).then(() => { e.target.value = ''; });
     });
     $('check-btn').addEventListener('click', runChecks);
+    $('tag-rows').addEventListener('change', e => {
+      const sel = e.target.closest('select');
+      if (!sel || !sel.value) return;
+      const action = sel.value; sel.value = '';
+      tagAction(sel.closest('tr').dataset.tag, action);
+    });
+    $('retidy-btn').addEventListener('click', retidy);
     $('review-view').addEventListener('change', () => { L.shown = 50; renderReview(); });
     $('review-search').addEventListener('input', () => { L.shown = 50; renderReview(); });
     $('review-more').addEventListener('click', () => { L.shown += 100; renderReview(); });
@@ -1137,8 +1256,9 @@ var Host = (() => {
   /* ---------- Choosing songs from the library ---------- */
   function choices() {
     const from = parseInt($('set-from').value, 10) || null, to = parseInt($('set-to').value, 10) || null;
-    const sources = [...document.querySelectorAll('#source-list input:checked')].map(i => i.value);
-    return { from, to, sources, checkedOnly: $('set-checked').checked };
+    const tags = [...document.querySelectorAll('#source-list input:checked')].map(i => i.value);
+    const tagMode = (document.querySelector('input[name="tag-mode"]:checked') || {}).value || 'any';
+    return { from, to, tags, tagMode, checkedOnly: $('set-checked').checked };
   }
 
   function renderSongsPanel() {
@@ -1146,22 +1266,25 @@ var Host = (() => {
     $('lib-summary').textContent = c.total
       ? `${c.total.toLocaleString('en-GB')} songs in the library. ${(c.checked + c.manual).toLocaleString('en-GB')} have checked years.`
       : 'The library is empty. Open the song library to add your first playlist.';
-    const saved = (store.get('sor-settings') || {}).sources;
+    const saved = (store.get('sor-settings') || {}).tags;
     const box = $('source-list');
     const ticked = box.children.length ? [...box.querySelectorAll('input:checked')].map(i => i.value) : (saved || null);
-    box.innerHTML = Library.sources().map(([n, count]) => `<label class="check"><input type="checkbox" value="${esc(n)}" ${!ticked || ticked.includes(n) ? 'checked' : ''}> ${esc(n)} <span class="hint">(${count.toLocaleString('en-GB')})</span></label>`).join('');
+    box.innerHTML = Library.sources().map(([n, count]) => `<label class="check"><input type="checkbox" value="${esc(n)}" ${ticked && ticked.includes(n) ? 'checked' : ''}> ${esc(n)} <span class="hint">(${count.toLocaleString('en-GB')})</span></label>`).join('');
     updateSetup();
   }
 
   function updateSetup() {
-    H.library = Library.pick(choices()).map(Library.toGameSong);
+    const ch = choices();
+    $('source-list').classList.toggle('off', ch.tagMode === 'all');
+    H.library = Library.pick(ch).map(Library.toGameSong);
     const n = H.library.length;
     $('match-count').textContent = Library.counts().total ? `${n.toLocaleString('en-GB')} song${n === 1 ? '' : 's'} match these choices.` : '';
     const ready = n > 0 && Music.loggedIn();
     $('create-room').disabled = !ready;
     $('setup-status').textContent = ready ? '' : !Music.loggedIn() ? 'Log in with Spotify to continue.'
       : !Library.counts().total ? 'Add a playlist to the song library to continue.'
-      : 'No songs match these choices. Widen the years, tick more playlists, or untick “Only songs with checked years”.';
+      : ch.tagMode !== 'all' && !ch.tags.length ? 'Tick at least one tag, or choose All songs in the library.'
+      : 'No songs match these choices. Widen the years, tick more tags, or untick “Only songs with checked years”.';
   }
 
   /* ---------- Room ---------- */
@@ -1182,7 +1305,7 @@ var Host = (() => {
     const mode = $('set-suggest').value;
     const ch = choices();
     store.set('sor-settings', { rounds: parseInt($('set-rounds').value, 10) || 10, timer: H.roundSeconds, auto: H.autoReveal, suggest: mode,
-      sources: ch.sources, from: ch.from, to: ch.to, checkedOnly: ch.checkedOnly });
+      tags: ch.tags, tagMode: ch.tagMode, from: ch.from, to: ch.to, checkedOnly: ch.checkedOnly });
 
     let game = null;
     for (let attempt = 0; attempt < 6 && !game; attempt++) {
@@ -1542,7 +1665,10 @@ var Host = (() => {
       if (st.from) $('set-from').value = st.from;
       if (st.to) $('set-to').value = st.to;
       if (st.checkedOnly === false) $('set-checked').checked = false;
+      const mode = document.querySelector(`input[name="tag-mode"][value="${st.tagMode || 'any'}"]`);
+      if (mode) mode.checked = true;
     }
+    document.querySelectorAll('input[name="tag-mode"]').forEach(r => r.addEventListener('change', updateSetup));
     ['set-from', 'set-to'].forEach(id => $(id).addEventListener('input', updateSetup));
     $('set-checked').addEventListener('change', updateSetup);
     $('source-list').addEventListener('change', updateSetup);
