@@ -804,7 +804,14 @@ function parseCSV(text) {
   const rows = []; let row = [], field = '', q = false;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
-    if (q) { if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; } else field += c; }
+    if (q) {
+      if (c === '"') {
+        const next = text[i + 1];
+        if (next === '"') { field += '"'; i++; }
+        else if (next === ',' || next === '\n' || next === '\r' || next === undefined) q = false;
+        else field += '"';   // a stray quote inside a field (Exportify sometimes writes "12" Mix") stays as text
+      } else field += c;
+    }
     else if (c === '"') q = true;
     else if (c === ',') { row.push(field); field = ''; }
     else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
@@ -944,7 +951,7 @@ var Library = (() => {
     const now = new Date().toISOString();
     const changes = new Map();
     let added = 0, merged = 0;
-    rows.filter(r => r.uri).forEach(r => {
+    rows.filter(r => /^spotify:track:/.test(r.uri)).forEach(r => {   // skips local files Spotify can't play
       const artists = Names.splitArtists(r.artistRaw);
       if (!artists.length) return;
       const known = L.byUri.get(r.uri);
