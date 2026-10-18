@@ -701,9 +701,12 @@ const Names = (() => {
   // Strip version tags but keep brackets that are part of the real title:
   // "Dreams - 2004 Remaster" -> "Dreams", "Get Lucky (feat. ...)" -> "Get Lucky",
   // but "9PM (Till I Come)" stays as it is.
-  const TAG = /^\s*(feat\.?|ft\.?|featuring|with|from)\b|\b(remaster(ed)?|re-?mix|mix|edit|version|live|mono|stereo|single|radio|demo|acoustic|instrumental|bonus|deluxe|anniversary|re-?record\w*|[ab] side|composers? cut|official|theme from|\w+mix|extended|(?:end|main) titles?|soundtrack|original series|from the (?:motion picture|film|series|tv series))\b|^\s*\d{4}\s*$/i;
-  function cleanTitle(t) {
+  const TAG = /^\s*(feat\.?|ft\.?|featuring|with|from)\b|\b(remaster(ed)?|re-?mix|mix|edit|version|live|mono|stereo|single|radio|demo|acoustic|instrumental|bonus|deluxe|anniversary|re-?record\w*|[ab] side|composers? cut|official|theme from|\w+mix|extended|(?:end|main) titles?|soundtrack|original series|studio recording|performance|from the (?:motion picture|film|series|tv series))\b|^\s*\d{4}\s*$/i;
+  function cleanTitle(t, artists) {
+    const others = (artists || []).map(a => key(a));
     const c = String(t || '')
+      .replace(/\s+(?:featuring|feat\.|ft\.)\s+[^()\[\]]*$/i, '')   // "Guess featuring Billie Eilish"
+      .replace(/\s+\+\s+([^()\[\]]+)$/, (m, who) => others.includes(key(who)) ? '' : m)   // "Stateside + Zara Larsson"
       .replace(/\s+-\s+(.*)$/, (m, rest) => TAG.test(rest) ? '' : m)
       .replace(/\s*[\(\[]([^\)\]]*)[\)\]]/g, (m, inner) => TAG.test(inner) ? '' : m)
       .trim();
@@ -752,14 +755,14 @@ const Names = (() => {
     const list = splitArtists(song.artistRaw);
     return matches(guess, [list.join(', '), ...list, ...list.map(leadName)]);
   };
-  const titleRight = (guess, song) => matches(guess, [cleanTitle(song.title), song.title]);
+  const titleRight = (guess, song) => matches(guess, [cleanTitle(song.title, splitArtists(song.artistRaw)), song.title]);
 
   // Unique display names from a list of songs
   function collect(songs) {
     const artists = new Map(), titles = new Map();
     songs.forEach(s => {
       splitArtists(s.artistRaw).forEach(a => { const k = key(a); if (k && !artists.has(k)) artists.set(k, a); });
-      const t = cleanTitle(s.title), k = key(t);
+      const t = cleanTitle(s.title, splitArtists(s.artistRaw)), k = key(t);
       if (k && !titles.has(k)) titles.set(k, t);
     });
     return { artists: [...artists.values()], titles: [...titles.values()] };
@@ -881,7 +884,7 @@ function scoreRound(rows, song, overrides) {
    SONG LIBRARY (host only): importing playlists, checking years
    ========================================================== */
 var Library = (() => {
-  const L = { songs: [], byKey: new Map(), checking: false, stopAsked: false, view: 'flagged', shown: 50, onChange: null };
+  const L = { songs: [], byKey: new Map(), byUri: new Map(), checking: false, stopAsked: false, view: 'flagged', shown: 50, onChange: null };
   const USABLE = ['checked', 'manual'];
   // Every save sends exactly these columns, so a batch mixing new and existing songs
   // never leaves a column blank (the database fills in created_at itself)
@@ -901,6 +904,7 @@ var Library = (() => {
     }
     L.songs = all;
     L.byKey = new Map(all.map(s => [s.song_key, s]));
+    L.byUri = new Map(all.map(s => [s.uri, s]));   // re-imports match by Spotify ID even if title tidying has changed
     changed();
     return all;
   }
@@ -943,14 +947,15 @@ var Library = (() => {
     rows.filter(r => r.uri).forEach(r => {
       const artists = Names.splitArtists(r.artistRaw);
       if (!artists.length) return;
-      const k = songKey(artists, r.title);
+      const known = L.byUri.get(r.uri);
+      const k = known ? known.song_key : songKey(artists, r.title);
       const y = parseInt(r.year, 10) || null;
       let row = changes.get(k);
       if (!row) {
-        const ex = L.byKey.get(k);
+        const ex = known || L.byKey.get(k);
         if (ex) { row = Object.assign({}, ex); merged++; }
         else {
-          row = { song_key: k, uri: r.uri, title: r.title, title_clean: Names.cleanTitle(r.title), artists, album: r.album || null,
+          row = { song_key: k, uri: r.uri, title: r.title, title_clean: Names.cleanTitle(r.title, artists), artists, album: r.album || null,
                   art: r.art || null, playlist_year: y, year: y, year_status: 'unchecked', mb_year: null, note: null, sources: [] };
           added++;
         }
@@ -1042,8 +1047,8 @@ var Library = (() => {
   }
 
   async function retidy() {
-    const changedRows = L.songs.filter(s => Names.cleanTitle(s.title) !== s.title_clean)
-      .map(s => Object.assign({}, s, { title_clean: Names.cleanTitle(s.title), updated_at: new Date().toISOString() }));
+    const changedRows = L.songs.filter(s => Names.cleanTitle(s.title, s.artists) !== s.title_clean)
+      .map(s => Object.assign({}, s, { title_clean: Names.cleanTitle(s.title, s.artists), updated_at: new Date().toISOString() }));
     if (!changedRows.length) { toast('All titles are already tidy.'); return; }
     if (!confirm(`Update the tidy title of ${nf(changedRows.length)} songs?`)) return;
     await saveRows(changedRows, 'Tidying');
@@ -1510,7 +1515,7 @@ var Host = (() => {
     try { await loadRound(); }
     catch (e) { toast('Couldn’t load the guesses: ' + e.message); H.revealing = false; return; }
     await saveMarks();
-    const answer = { title: Names.cleanTitle(H.song.title), artist: H.song.artist, year: H.song.year || '', art: H.song.art || Music.currentArt() || '' };
+    const answer = { title: Names.cleanTitle(H.song.title, Names.splitArtists(H.song.artistRaw)), artist: H.song.artist, year: H.song.year || '', art: H.song.art || Music.currentArt() || '' };
     H.song.art = answer.art;
     await sb.from('games').update({ status: 'revealed', answer }).eq('id', H.gameId);
     H.phase = 'revealed'; H.revealing = false;
@@ -1540,7 +1545,7 @@ var Host = (() => {
     const s = H.song;
     $('reveal-label').textContent = `Song ${H.round} of ${H.totalRounds}`;
     $('answer-year').textContent = s.year || 'Year unknown';
-    $('answer-title').textContent = Names.cleanTitle(s.title);
+    $('answer-title').textContent = Names.cleanTitle(s.title, Names.splitArtists(s.artistRaw));
     $('answer-artist').textContent = s.artist;
     $('answer-art').style.backgroundImage = s.art ? `url("${s.art}")` : '';
     $('answer-vinyl').classList.toggle('art', !!s.art);
