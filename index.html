@@ -742,7 +742,16 @@ const Names = (() => {
       return sim >= (a.length <= 4 ? 0.74 : 0.8);
     });
   }
-  const artistRight = (guess, song) => matches(guess, [splitArtists(song.artistRaw).join(', '), ...splitArtists(song.artistRaw)]);
+  // "Cliff Richard & The Shadows", "Pat Boone and His Orchestra", "Tony Bennett with Orchestra":
+  // the lead name on its own also counts as right
+  const leadName = a => a
+    .replace(/\s+(?:&|and)\s+(?:the|his|her)\b.*$/i, '')
+    .replace(/\s+(?:(?:&|and)\s+)?with\s+.*$/i, '')
+    .trim();
+  const artistRight = (guess, song) => {
+    const list = splitArtists(song.artistRaw);
+    return matches(guess, [list.join(', '), ...list, ...list.map(leadName)]);
+  };
   const titleRight = (guess, song) => matches(guess, [cleanTitle(song.title), song.title]);
 
   // Unique display names from a list of songs
