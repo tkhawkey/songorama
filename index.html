@@ -874,6 +874,11 @@ function scoreRound(rows, song, overrides) {
 var Library = (() => {
   const L = { songs: [], byKey: new Map(), checking: false, stopAsked: false, view: 'flagged', shown: 50, onChange: null };
   const USABLE = ['checked', 'manual'];
+  // Every save sends exactly these columns, so a batch mixing new and existing songs
+  // never leaves a column blank (the database fills in created_at itself)
+  const COLUMNS = ['song_key', 'uri', 'title', 'title_clean', 'artists', 'album', 'art', 'playlist_year',
+                   'year', 'year_status', 'mb_year', 'note', 'sources', 'updated_at'];
+  const forSaving = rows => rows.map(r => { const o = {}; COLUMNS.forEach(c => { o[c] = r[c] === undefined ? null : r[c]; }); return o; });
   const songKey = (artists, title) => Names.key(artists[0] || '') + '|' + Names.key(Names.cleanTitle(title));
   const nf = n => n.toLocaleString('en-GB');
 
@@ -957,7 +962,7 @@ var Library = (() => {
     const list = [...changes.values()];
     for (let i = 0; i < list.length; i += 500) {
       status.textContent = `Saving ${nf(Math.min(i + 500, list.length))} of ${nf(list.length)}…`;
-      const { error } = await sb.from('songs').upsert(list.slice(i, i + 500), { onConflict: 'song_key' });
+      const { error } = await sb.from('songs').upsert(forSaving(list.slice(i, i + 500)), { onConflict: 'song_key' });
       if (error) { status.textContent = 'Saving stopped part-way: ' + error.message + '. Run it again to finish; nothing is added twice.'; await load(); return; }
     }
     await load();
@@ -969,7 +974,7 @@ var Library = (() => {
   /* ---------- Tag manager ---------- */
   async function saveRows(rows, label) {
     for (let i = 0; i < rows.length; i += 500) {
-      const { error } = await sb.from('songs').upsert(rows.slice(i, i + 500), { onConflict: 'song_key' });
+      const { error } = await sb.from('songs').upsert(forSaving(rows.slice(i, i + 500)), { onConflict: 'song_key' });
       if (error) { toast(label + ' stopped part-way: ' + error.message); break; }
     }
     await load();
