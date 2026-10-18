@@ -282,8 +282,38 @@
   .pills i.on { background: var(--lilac); color: #140f2b; }
   .mark .secs { color: var(--muted); font-size: 13px; margin-left: 2px; }
   .mark .bolt { color: var(--amber); font-weight: 800; }
-  .decoy-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .btn.small { padding: 8px 14px; font-size: 15px; }
+
+  /* ---------- Song library ---------- */
+  .lib-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 26px 0; }
+  .lib-stats div { background: var(--bg-raised); border-radius: 18px; padding: 16px 18px; }
+  .lib-stats b { display: block; font-size: 36px; font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; }
+  .lib-stats span { color: var(--muted); font-size: 15px; }
+  .lib-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 860px) { .lib-grid, .lib-stats { grid-template-columns: 1fr 1fr; } }
+  .progress { height: 10px; border-radius: 999px; background: var(--bg-sunk); overflow: hidden; }
+  .progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--lilac), var(--pink)); transition: width .4s; }
+  .check-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 14px; color: var(--muted); max-height: 150px; overflow: hidden; }
+  .check-log .flag { color: var(--amber); }
+  .review-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; margin: 26px 0 10px; }
+  .review-tools label { flex: 1; min-width: 180px; }
+  table.review { width: 100%; border-collapse: separate; border-spacing: 0 6px; font-size: 15px; }
+  table.review th { text-align: left; color: var(--muted); font-weight: 600; font-size: 13px; padding: 0 10px; }
+  table.review td { background: var(--bg-raised); padding: 8px 10px; vertical-align: middle; }
+  table.review td:first-child { border-radius: 12px 0 0 12px; }
+  table.review td:last-child { border-radius: 0 12px 12px 0; white-space: nowrap; }
+  table.review .song b { display: block; }
+  table.review .song span, table.review .note { color: var(--muted); font-size: 13px; }
+  table.review input { width: 84px; display: inline-block; margin: 0; padding: 7px 9px; font-size: 15px; border-radius: 10px; }
+  .status { font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: var(--bg-sunk); color: var(--muted); white-space: nowrap; }
+  .status.checked, .status.manual { color: var(--mint); }
+  .status.flagged { color: var(--amber); }
+  .status.excluded { color: #FF8A8A; }
+  .source-list { display: grid; gap: 8px; }
+  .year-range { display: flex; gap: 10px; }
+  .year-range label { flex: 1; }
+  .fix-year { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .fix-year input { width: 110px; margin: 0; display: inline-block; }
 </style>
 </head>
 <body>
@@ -307,13 +337,16 @@
       <details class="hint"><summary>Redirect URI for your Spotify app</summary><p style="margin-top:6px"><code id="redirect-uri"></code></p></details>
     </div>
     <div class="panel">
-      <h2>Playlist</h2>
-      <label>Exportify CSV or JSON <input type="file" id="playlist-file" accept=".csv,.json"></label>
-      <p id="playlist-status" class="hint">Export a Spotify playlist at exportify.app and load the file here.</p>
-      <h2 style="margin-top:8px">Decoys</h2>
-      <p id="decoy-status" class="hint">Checking saved decoys…</p>
-      <label>Add a decoy playlist <input type="file" id="decoy-file" accept=".csv,.json"></label>
-      <div class="decoy-row"><button id="decoy-clear" class="btn small" hidden>Remove all decoys</button></div>
+      <h2>Songs</h2>
+      <p id="lib-summary" class="hint">Loading the song library…</p>
+      <div id="source-list" class="source-list"></div>
+      <div class="year-range">
+        <label>From year <input type="number" id="set-from" min="1900" max="2100" placeholder="Any"></label>
+        <label>To year <input type="number" id="set-to" min="1900" max="2100" placeholder="Any"></label>
+      </div>
+      <label class="check"><input type="checkbox" id="set-checked" checked> Only songs with checked years</label>
+      <p id="match-count" class="hint"></p>
+      <button id="open-library" class="btn">Open the song library</button>
     </div>
     <div class="panel">
       <h2>Rules</h2>
@@ -329,8 +362,7 @@
       </label>
       <label>Suggestions while typing
         <select id="set-suggest">
-          <option value="decoys">From the playlist and decoys</option>
-          <option value="playlist">From the playlist only</option>
+          <option value="library">From the whole song library</option>
           <option value="off">No suggestions</option>
         </select>
       </label>
@@ -343,6 +375,56 @@
     <button id="resume-room" class="btn" hidden>Resume room</button>
   </div>
   <p id="setup-status" class="hint" style="margin-top:12px"></p>
+</section>
+
+<!-- ============ Host: song library ============ -->
+<section id="h-library" class="screen" hidden>
+  <div class="topbar"><span class="round-title">Song library</span><button id="library-back" class="btn small">Back to game setup</button></div>
+  <div class="lib-stats">
+    <div><b id="st-total">0</b><span>songs</span></div>
+    <div><b id="st-checked">0</b><span>years checked or fixed</span></div>
+    <div><b id="st-flagged">0</b><span>to review</span></div>
+    <div><b id="st-unchecked">0</b><span>not checked yet</span></div>
+  </div>
+
+  <div class="lib-grid">
+    <div class="panel">
+      <h2>Add a playlist</h2>
+      <label>Name for this playlist <input type="text" id="import-name" placeholder="For example: NOW 1–125"></label>
+      <label>Exportify CSV <input type="file" id="import-file" accept=".csv,.json"></label>
+      <p id="import-status" class="hint">Songs already in the library are merged, not added twice. The name becomes a filter on the game setup screen.</p>
+    </div>
+    <div class="panel">
+      <h2>Check years</h2>
+      <p id="check-intro" class="hint">Looks up when each song was first released, using MusicBrainz. It does about one song per second, so leave this tab open. Progress is saved as it goes; you can stop and carry on later.</p>
+      <div class="progress"><i id="check-bar"></i></div>
+      <p id="check-status" class="hint"></p>
+      <ul id="check-log" class="check-log"></ul>
+      <button id="check-btn" class="btn primary">Start checking years</button>
+    </div>
+  </div>
+
+  <div class="review-tools">
+    <label>Show
+      <select id="review-view">
+        <option value="flagged">Songs to review</option>
+        <option value="unchecked">Not checked yet</option>
+        <option value="checked">Checked</option>
+        <option value="manual">Fixed by hand</option>
+        <option value="excluded">Left out of games</option>
+        <option value="all">All songs</option>
+      </select>
+    </label>
+    <label>Find a song or artist <input type="text" id="review-search" autocomplete="off" spellcheck="false"></label>
+  </div>
+  <p id="review-count" class="hint"></p>
+  <div class="table-wrap">
+    <table class="review">
+      <thead><tr><th>Song</th><th>Playlist year</th><th>MusicBrainz</th><th>Note</th><th>Year used</th><th></th></tr></thead>
+      <tbody id="review-rows"></tbody>
+    </table>
+  </div>
+  <div class="actions"><button id="review-more" class="btn" hidden>Show more</button></div>
 </section>
 
 <!-- ============ Host: lobby ============ -->
@@ -401,6 +483,13 @@
       <p id="answer-year" class="answer-year"></p>
       <h2 id="answer-title" class="answer-title"></h2>
       <p id="answer-artist" class="answer-artist"></p>
+      <div class="fix-year">
+        <button id="fix-year-btn" class="btn small">Wrong year?</button>
+        <span id="fix-year-form" hidden>
+          <input id="fix-year-input" inputmode="numeric" maxlength="4" aria-label="Correct year">
+          <button id="fix-year-save" class="btn small primary">Save year and re-mark</button>
+        </span>
+      </div>
     </div>
   </div>
   <div class="table-wrap">
@@ -582,12 +671,24 @@ const Names = (() => {
       .replace(/&/g, ' and ').replace(/['\u2019`]/g, '').replace(/[^a-z0-9 ]+/g, ' ')
       .replace(/\s+/g, ' ').trim().replace(/^the /, '');
   }
-  // "Dreams - 2004 Remaster" -> "Dreams", "Get Lucky (feat. ...)" -> "Get Lucky"
+  // Strip version tags but keep brackets that are part of the real title:
+  // "Dreams - 2004 Remaster" -> "Dreams", "Get Lucky (feat. ...)" -> "Get Lucky",
+  // but "9PM (Till I Come)" stays as it is.
+  const TAG = /^\s*(feat\.?|ft\.?|featuring|with|from)\b|\b(remaster(ed)?|re-?mix|mix|edit|version|live|mono|stereo|single|radio|demo|acoustic|instrumental|bonus|deluxe|anniversary|re-?record\w*|[ab] side|composers? cut|official|theme from)\b|^\s*\d{4}\s*$/i;
   function cleanTitle(t) {
-    const c = String(t || '').replace(/\s+-\s+.*$/, '').replace(/\s*[\(\[][^\)\]]*[\)\]]/g, '').trim();
+    const c = String(t || '')
+      .replace(/\s+-\s+(.*)$/, (m, rest) => TAG.test(rest) ? '' : m)
+      .replace(/\s*[\(\[]([^\)\]]*)[\)\]]/g, (m, inner) => TAG.test(inner) ? '' : m)
+      .trim();
     return c || String(t || '').trim();
   }
-  const splitArtists = raw => String(raw || '').split(';').map(s => s.trim()).filter(Boolean);
+  // Exportify separates artists with ";" in newer files and "," in older ones,
+  // where a comma inside a name is written "\," (e.g. "Emerson\, Lake & Palmer").
+  function splitArtists(raw) {
+    const s = String(raw || '');
+    const parts = s.includes(';') ? s.split(';') : s.replace(/\\,/g, '\u0000').split(',');
+    return parts.map(p => p.replace(/\u0000/g, ',').replace(/\\,/g, ',').trim()).filter(Boolean);
+  }
 
   function lev(a, b) {
     if (a === b) return 0;
@@ -614,7 +715,7 @@ const Names = (() => {
       return sim >= (a.length <= 4 ? 0.74 : 0.8);
     });
   }
-  const artistRight = (guess, song) => matches(guess, [song.artistRaw, ...splitArtists(song.artistRaw)]);
+  const artistRight = (guess, song) => matches(guess, [splitArtists(song.artistRaw).join(', '), ...splitArtists(song.artistRaw)]);
   const titleRight = (guess, song) => matches(guess, [cleanTitle(song.title), song.title]);
 
   // Unique display names from a list of songs
@@ -653,7 +754,8 @@ const Names = (() => {
     return hits.slice(0, max || 6).map(h => h.n);
   }
 
-  return { key, cleanTitle, splitArtists, artistRight, titleRight, collect, mergeUnique, index, search, searchKey };
+  const similar = (a, b) => { a = key(a).replace(/ /g, ''); b = key(b).replace(/ /g, ''); return 1 - lev(a, b) / Math.max(a.length, b.length, 1); };
+  return { key, cleanTitle, splitArtists, artistRight, titleRight, collect, mergeUnique, index, search, searchKey, similar };
 })();
 
 /* ==========================================================
@@ -689,6 +791,7 @@ function readSongs(file) {
             artistRaw,
             artist: Names.splitArtists(artistRaw).join(', '),
             year: yearOf(it['Release Date'] || it['Album Release Date'] || it.year || it.release_date),
+            album: it['Album Name'] || it.album || '',
             art: it['Album Image URL'] || it.image || ''
           };
         }).filter(s => s.title && s.artistRaw));
@@ -739,11 +842,287 @@ function scoreRound(rows, song, overrides) {
 }
 
 /* ==========================================================
+   SONG LIBRARY (host only): importing playlists, checking years
+   ========================================================== */
+var Library = (() => {
+  const L = { songs: [], byKey: new Map(), checking: false, stopAsked: false, view: 'flagged', shown: 50, onChange: null };
+  const USABLE = ['checked', 'manual'];
+  const songKey = (artists, title) => Names.key(artists[0] || '') + '|' + Names.key(Names.cleanTitle(title));
+  const nf = n => n.toLocaleString('en-GB');
+
+  async function load() {
+    const all = [];
+    for (let from = 0; ; from += 1000) {   // Supabase hands rows over 1,000 at a time
+      const { data, error } = await sb.from('songs').select('*').order('song_key').range(from, from + 999);
+      if (error) throw new Error(error.message);
+      all.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    L.songs = all;
+    L.byKey = new Map(all.map(s => [s.song_key, s]));
+    changed();
+    return all;
+  }
+
+  function changed() { renderStats(); if (L.onChange) L.onChange(); }
+
+  function counts() {
+    const c = { total: L.songs.length, checked: 0, flagged: 0, unchecked: 0, manual: 0, excluded: 0 };
+    L.songs.forEach(s => { c[s.year_status] = (c[s.year_status] || 0) + 1; });
+    return c;
+  }
+
+  function sources() {
+    const m = new Map();
+    L.songs.forEach(s => (s.sources || []).forEach(n => m.set(n, (m.get(n) || 0) + 1)));
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }
+
+  /* ---------- Importing an Exportify file ---------- */
+  async function importFile(file, sourceName) {
+    const status = $('import-status');
+    status.textContent = 'Reading the file…';
+    let rows;
+    try { rows = await readSongs(file); } catch (e) { status.textContent = 'That file couldn’t be read. Use the CSV straight from Exportify.'; return; }
+    const now = new Date().toISOString();
+    const changes = new Map();
+    let added = 0, merged = 0;
+    rows.filter(r => r.uri).forEach(r => {
+      const artists = Names.splitArtists(r.artistRaw);
+      if (!artists.length) return;
+      const k = songKey(artists, r.title);
+      const y = parseInt(r.year, 10) || null;
+      let row = changes.get(k);
+      if (!row) {
+        const ex = L.byKey.get(k);
+        if (ex) { row = Object.assign({}, ex); merged++; }
+        else {
+          row = { song_key: k, uri: r.uri, title: r.title, title_clean: Names.cleanTitle(r.title), artists, album: r.album || null,
+                  art: r.art || null, playlist_year: y, year: y, year_status: 'unchecked', mb_year: null, note: null, sources: [] };
+          added++;
+        }
+        changes.set(k, row);
+      }
+      if (!row.sources.includes(sourceName)) row.sources = row.sources.concat(sourceName);
+      if (!row.art && r.art) row.art = r.art;
+      if (y && (!row.playlist_year || y < row.playlist_year)) {
+        row.playlist_year = y;
+        if (row.year_status === 'unchecked') row.year = y;
+        else if (row.year && y < row.year && row.year_status !== 'manual') {
+          row.year_status = 'flagged';
+          row.note = `A playlist album is from ${y}, earlier than ${row.year}`;
+        }
+      }
+      row.updated_at = now;
+    });
+    const list = [...changes.values()];
+    for (let i = 0; i < list.length; i += 500) {
+      status.textContent = `Saving ${nf(Math.min(i + 500, list.length))} of ${nf(list.length)}…`;
+      const { error } = await sb.from('songs').upsert(list.slice(i, i + 500), { onConflict: 'song_key' });
+      if (error) { status.textContent = 'Saving stopped part-way: ' + error.message + '. Run it again to finish; nothing is added twice.'; await load(); return; }
+    }
+    await load();
+    status.innerHTML = `<span class="ok">${nf(added)} new songs added</span>, ${nf(merged)} already in the library and merged. ` +
+      (added ? 'Press Start checking years to find their first-release years.' : '');
+    renderReview();
+  }
+
+  /* ---------- Checking years with MusicBrainz ---------- */
+  const lucene = s => '"' + String(s).replace(/[\\"]/g, '\\$&') + '"';
+  const NOT_ORIGINAL = /\b(live|demo|remix|instrumental|karaoke|acoustic|rehearsal|session|cover)\b/i;
+
+  async function lookup(song) {
+    const q = `recording:${lucene(song.title_clean)} AND artist:${lucene(song.artists[0])}`;
+    const url = 'https://musicbrainz.org/ws/2/recording?fmt=json&limit=25&query=' + encodeURIComponent(q);
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (res.status === 503 || res.status === 429) { await sleep(2500 * attempt); continue; }   // asked to slow down
+      if (!res.ok) throw new Error('MusicBrainz replied ' + res.status);
+      return res.json();
+    }
+    throw new Error('MusicBrainz was too busy');
+  }
+
+  function judge(song, data) {
+    const wantArtists = song.artists.map(a => Names.key(a));
+    const years = [];
+    for (const r of (data.recordings || [])) {
+      const d = r['first-release-date'];
+      if (!d || !/^\d{4}/.test(d)) continue;
+      if (NOT_ORIGINAL.test(r.disambiguation || '') || /[\(\[-][^\)\]]*\blive\b/i.test(r.title)) continue;
+      if (Names.similar(Names.cleanTitle(r.title), song.title_clean) < 0.88) continue;
+      const credits = (r['artist-credit'] || []).map(c => Names.key(c.name || (c.artist && c.artist.name) || ''));
+      const joined = credits.join(' ');
+      const artistOk = credits.some(c => wantArtists.some(w => w === c || Names.similar(w, c) >= 0.85)) || joined.includes(wantArtists[0]);
+      if (!artistOk) continue;
+      years.push(parseInt(d.slice(0, 4), 10));
+    }
+    const py = song.playlist_year;
+    if (!years.length) return { year_status: 'flagged', mb_year: null, year: py, note: 'Not found on MusicBrainz' };
+    const mb = Math.min(...years);
+    if (py && mb > py + 1) return { year_status: 'flagged', mb_year: mb, year: py, note: `MusicBrainz says ${mb}, but a playlist album is from ${py}` };
+    return { year_status: 'checked', mb_year: mb, year: py ? Math.min(mb, py) : mb, note: null };
+  }
+
+  async function runChecks() {
+    if (L.checking) { L.stopAsked = true; $('check-btn').textContent = 'Stopping…'; return; }
+    const queue = L.songs.filter(s => s.year_status === 'unchecked');
+    if (!queue.length) { $('check-status').textContent = 'Every song has been checked.'; return; }
+    L.checking = true; L.stopAsked = false;
+    $('check-btn').textContent = 'Stop checking';
+    const log = $('check-log'); log.innerHTML = '';
+    const started = Date.now();
+    let done = 0, stopReason = '';
+    for (const song of queue) {
+      if (L.stopAsked) { stopReason = 'Stopped. Press Start to carry on from here.'; break; }
+      const t0 = Date.now();
+      let patch;
+      try { patch = judge(song, await lookup(song)); }
+      catch (e) {
+        if (e instanceof TypeError) { stopReason = 'Can’t reach MusicBrainz. Check the internet connection, then press Start again.'; break; }
+        patch = { year_status: 'flagged', note: e.message, mb_year: null, year: song.year };
+      }
+      patch.updated_at = new Date().toISOString();
+      const { error } = await sb.from('songs').update(patch).eq('song_key', song.song_key);
+      if (error) { stopReason = 'Couldn’t save to Supabase: ' + error.message; break; }
+      Object.assign(song, patch);
+      done++;
+      const left = queue.length - done;
+      const perSong = (Date.now() - started) / done;
+      const mins = Math.ceil(left * perSong / 60000);
+      $('check-bar').style.width = Math.round(done / queue.length * 100) + '%';
+      $('check-status').textContent = `${nf(done)} of ${nf(queue.length)} checked. About ${mins} minute${mins === 1 ? '' : 's'} to go.`;
+      const li = document.createElement('li');
+      if (patch.year_status === 'flagged') li.className = 'flag';
+      li.textContent = `${song.title_clean} by ${song.artists[0]}: ` + (patch.year_status === 'checked' ? patch.year : 'needs review (' + patch.note + ')');
+      log.prepend(li);
+      while (log.children.length > 6) log.lastChild.remove();
+      if (done % 10 === 0) changed();
+      const wait = 1100 - (Date.now() - t0);   // MusicBrainz allows one request a second
+      if (wait > 0) await sleep(wait);
+    }
+    L.checking = false;
+    $('check-btn').textContent = 'Start checking years';
+    if (!stopReason) $('check-status').textContent = `Finished. ${nf(done)} songs checked.`;
+    else $('check-status').textContent = stopReason;
+    changed();
+    renderReview();
+  }
+
+  /* ---------- Review and fix ---------- */
+  function renderStats() {
+    const c = counts();
+    $('st-total').textContent = nf(c.total);
+    $('st-checked').textContent = nf(c.checked + c.manual);
+    $('st-flagged').textContent = nf(c.flagged);
+    $('st-unchecked').textContent = nf(c.unchecked);
+    const mins = Math.ceil(c.unchecked * 1.15 / 60);
+    if (!L.checking) $('check-status').textContent = c.unchecked
+      ? `${nf(c.unchecked)} songs to check, about ${mins >= 90 ? Math.round(mins / 60 * 10) / 10 + ' hours' : mins + ' minutes'}.`
+      : (c.total ? 'Every song has been checked.' : 'Add a playlist first.');
+  }
+
+  const STATUS_LABEL = { unchecked: 'Not checked', checked: 'Checked', flagged: 'To review', manual: 'Fixed by hand', excluded: 'Left out' };
+
+  function filtered() {
+    const view = $('review-view').value, q = Names.searchKey($('review-search').value);
+    return L.songs.filter(s => (view === 'all' || s.year_status === view) &&
+      (!q || Names.searchKey(s.title + ' ' + s.artists.join(' ')).includes(q)));
+  }
+
+  function renderReview() {
+    const list = filtered();
+    $('review-count').textContent = list.length ? `${nf(list.length)} song${list.length === 1 ? '' : 's'}` : 'Nothing to show here.';
+    $('review-rows').innerHTML = list.slice(0, L.shown).map(s => `<tr data-key="${esc(s.song_key)}">
+      <td class="song"><b>${esc(s.title_clean)}</b><span>${esc(s.artists.join(', '))}${s.album ? ' — ' + esc(s.album) : ''}</span></td>
+      <td>${s.playlist_year || ''}</td>
+      <td>${s.mb_year || ''}</td>
+      <td class="note">${esc(s.note || '')} <span class="status ${s.year_status}">${STATUS_LABEL[s.year_status] || s.year_status}</span></td>
+      <td><input value="${s.year || ''}" inputmode="numeric" maxlength="4" aria-label="Year for ${esc(s.title_clean)}"></td>
+      <td><button class="btn small" data-act="save">Save</button>
+          <button class="btn small" data-act="${s.year_status === 'excluded' ? 'include' : 'exclude'}">${s.year_status === 'excluded' ? 'Use in games' : 'Leave out'}</button></td>
+    </tr>`).join('');
+    $('review-more').hidden = list.length <= L.shown;
+  }
+
+  async function act(tr, action) {
+    const s = L.byKey.get(tr.dataset.key);
+    if (!s) return;
+    let patch;
+    if (action === 'save') {
+      const y = parseInt(tr.querySelector('input').value, 10);
+      if (!(y >= 1900 && y <= 2100)) { toast('Type the year as four digits, like 1977.'); return; }
+      patch = { year: y, year_status: 'manual', note: null };
+    } else if (action === 'exclude') patch = { year_status: 'excluded' };
+    else patch = { year_status: s.year && s.mb_year ? 'checked' : 'manual' };
+    patch.updated_at = new Date().toISOString();
+    const { error } = await sb.from('songs').update(patch).eq('song_key', s.song_key);
+    if (error) { toast('Didn’t save: ' + error.message); return; }
+    Object.assign(s, patch);
+    changed();
+    renderReview();
+  }
+
+  // Used by the reveal screen's "Wrong year?" button
+  async function fixYear(key, year) {
+    const patch = { year, year_status: 'manual', note: 'Fixed during a game', updated_at: new Date().toISOString() };
+    const { error } = await sb.from('songs').update(patch).eq('song_key', key);
+    if (error) throw new Error(error.message);
+    const s = L.byKey.get(key);
+    if (s) Object.assign(s, patch);
+  }
+
+  /* ---------- What the game can use ---------- */
+  function pick(opts) {
+    return L.songs.filter(s => {
+      if (s.year_status === 'excluded' || !s.uri) return false;
+      if (opts.checkedOnly && !USABLE.includes(s.year_status)) return false;
+      if (opts.from && !(s.year >= opts.from)) return false;
+      if (opts.to && !(s.year <= opts.to)) return false;
+      if (opts.sources && opts.sources.length && !(s.sources || []).some(n => opts.sources.includes(n))) return false;
+      return true;
+    });
+  }
+  function names() {
+    const usable = L.songs.filter(s => s.year_status !== 'excluded');
+    return {
+      artists: Names.mergeUnique(usable.flatMap(s => s.artists || [])),
+      titles: Names.mergeUnique(usable.map(s => s.title_clean))
+    };
+  }
+  const toGameSong = s => ({
+    key: s.song_key, uri: s.uri, title: s.title, artistRaw: (s.artists || []).join(';'),
+    artist: (s.artists || []).join(', '), year: s.year ? String(s.year) : '', art: s.art || ''
+  });
+
+  function init(onChange) {
+    L.onChange = onChange;
+    $('import-file').addEventListener('change', e => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const name = $('import-name').value.trim() || f.name.replace(/\.(csv|json)$/i, '').replace(/_/g, ' ');
+      importFile(f, name).then(() => { e.target.value = ''; });
+    });
+    $('check-btn').addEventListener('click', runChecks);
+    $('review-view').addEventListener('change', () => { L.shown = 50; renderReview(); });
+    $('review-search').addEventListener('input', () => { L.shown = 50; renderReview(); });
+    $('review-more').addEventListener('click', () => { L.shown += 100; renderReview(); });
+    $('review-rows').addEventListener('click', e => {
+      const b = e.target.closest('button[data-act]');
+      if (b) act(b.closest('tr'), b.dataset.act);
+    });
+    window.addEventListener('beforeunload', e => { if (L.checking) { e.preventDefault(); e.returnValue = ''; } });
+  }
+
+  return { init, load, counts, sources, pick, names, toGameSong, fixYear, renderReview, isChecking: () => L.checking };
+})();
+
+/* ==========================================================
    HOST
    ========================================================== */
 var Host = (() => {
   const H = {
-    library: [], decoys: { artists: [], titles: [] }, gameId: null, code: null, order: [], songIndex: -1, round: 0,
+    library: [], gameId: null, code: null, order: [], songIndex: -1, round: 0,
     totalRounds: 10, roundSeconds: 45, autoReveal: true, phase: 'setup', song: null,
     players: new Map(), guesses: new Map(), roundRows: [], overrides: {}, deltas: new Map(),
     roundStartedAt: null, channel: null, timer: null, poll: null, roundStart: 0, revealing: false
@@ -755,59 +1134,34 @@ var Host = (() => {
     phase: H.phase, song: H.song, roundStart: H.roundStart, overrides: H.overrides
   });
 
-  /* ---------- Playlist ---------- */
-  async function loadPlaylist(file) {
-    try {
-      H.library = (await readSongs(file)).filter(s => s.uri);
-      const noYear = H.library.filter(s => !s.year).length;
-      $('playlist-status').innerHTML = `<span class="ok">${H.library.length} songs ready.</span>` + (noYear ? ` ${noYear} have no year, so the year won’t score for those.` : '');
-      $('set-rounds').value = Math.min(Number($('set-rounds').value) || 10, H.library.length);
-    } catch (e) {
-      H.library = [];
-      $('playlist-status').textContent = 'That file couldn’t be read. Use the CSV straight from Exportify.';
-    }
+  /* ---------- Choosing songs from the library ---------- */
+  function choices() {
+    const from = parseInt($('set-from').value, 10) || null, to = parseInt($('set-to').value, 10) || null;
+    const sources = [...document.querySelectorAll('#source-list input:checked')].map(i => i.value);
+    return { from, to, sources, checkedOnly: $('set-checked').checked };
+  }
+
+  function renderSongsPanel() {
+    const c = Library.counts();
+    $('lib-summary').textContent = c.total
+      ? `${c.total.toLocaleString('en-GB')} songs in the library. ${(c.checked + c.manual).toLocaleString('en-GB')} have checked years.`
+      : 'The library is empty. Open the song library to add your first playlist.';
+    const saved = (store.get('sor-settings') || {}).sources;
+    const box = $('source-list');
+    const ticked = box.children.length ? [...box.querySelectorAll('input:checked')].map(i => i.value) : (saved || null);
+    box.innerHTML = Library.sources().map(([n, count]) => `<label class="check"><input type="checkbox" value="${esc(n)}" ${!ticked || ticked.includes(n) ? 'checked' : ''}> ${esc(n)} <span class="hint">(${count.toLocaleString('en-GB')})</span></label>`).join('');
     updateSetup();
   }
 
-  /* ---------- Decoys (saved in Supabase, reused every game) ---------- */
-  async function loadDecoys() {
-    const { data, error } = await sb.from('decoy_sets').select('artists,titles');
-    if (error) { $('decoy-status').textContent = 'Couldn’t load decoys: ' + error.message; return; }
-    H.decoys = {
-      artists: Names.mergeUnique(...(data || []).map(d => d.artists || [])),
-      titles: Names.mergeUnique(...(data || []).map(d => d.titles || []))
-    };
-    const n = (data || []).length;
-    $('decoy-status').textContent = n
-      ? `${n} decoy playlist${n === 1 ? '' : 's'} saved: ${H.decoys.artists.length} artists and ${H.decoys.titles.length} song titles.`
-      : 'No decoys saved yet. Add a big playlist of hits so suggestions don’t give the answers away.';
-    $('decoy-clear').hidden = n === 0;
-  }
-
-  async function addDecoys(file) {
-    $('decoy-status').textContent = 'Saving decoys…';
-    try {
-      const lists = Names.collect(await readSongs(file));
-      const { error } = await sb.from('decoy_sets').insert({ name: file.name, artists: lists.artists, titles: lists.titles });
-      if (error) throw new Error(error.message);
-    } catch (e) {
-      $('decoy-status').textContent = 'Those decoys didn’t save: ' + (e.message || 'the file couldn’t be read') + '.';
-      return;
-    }
-    $('decoy-file').value = '';
-    loadDecoys();
-  }
-
-  async function clearDecoys() {
-    if (!confirm('Remove all saved decoy playlists?')) return;
-    await sb.from('decoy_sets').delete().not('id', 'is', null);
-    loadDecoys();
-  }
-
   function updateSetup() {
-    const ready = H.library.length > 0 && Music.loggedIn();
+    H.library = Library.pick(choices()).map(Library.toGameSong);
+    const n = H.library.length;
+    $('match-count').textContent = Library.counts().total ? `${n.toLocaleString('en-GB')} song${n === 1 ? '' : 's'} match these choices.` : '';
+    const ready = n > 0 && Music.loggedIn();
     $('create-room').disabled = !ready;
-    $('setup-status').textContent = ready ? '' : !Music.loggedIn() ? 'Log in with Spotify to continue.' : 'Load a playlist to continue.';
+    $('setup-status').textContent = ready ? '' : !Music.loggedIn() ? 'Log in with Spotify to continue.'
+      : !Library.counts().total ? 'Add a playlist to the song library to continue.'
+      : 'No songs match these choices. Widen the years, tick more playlists, or untick “Only songs with checked years”.';
   }
 
   /* ---------- Room ---------- */
@@ -826,7 +1180,9 @@ var Host = (() => {
     H.roundSeconds = parseInt($('set-timer').value, 10) || 0;
     H.autoReveal = $('set-auto').checked;
     const mode = $('set-suggest').value;
-    store.set('sor-settings', { rounds: H.totalRounds, timer: H.roundSeconds, auto: H.autoReveal, suggest: mode });
+    const ch = choices();
+    store.set('sor-settings', { rounds: parseInt($('set-rounds').value, 10) || 10, timer: H.roundSeconds, auto: H.autoReveal, suggest: mode,
+      sources: ch.sources, from: ch.from, to: ch.to, checkedOnly: ch.checkedOnly });
 
     let game = null;
     for (let attempt = 0; attempt < 6 && !game; attempt++) {
@@ -841,17 +1197,15 @@ var Host = (() => {
     if (!game) { $('setup-status').textContent = 'Couldn’t find a free room code. Try again.'; $('create-room').disabled = false; return; }
 
     if (mode !== 'off') {
-      const own = Names.collect(H.library);
-      const artists = shuffle(Names.mergeUnique(own.artists, mode === 'decoys' ? H.decoys.artists : []));
-      const titles = shuffle(Names.mergeUnique(own.titles, mode === 'decoys' ? H.decoys.titles : []));
-      const { error } = await sb.from('suggestion_lists').insert({ game_id: game.id, artists, titles });
+      // Every name in the library, so the suggestions never narrow down the answer
+      const all = Library.names();
+      const { error } = await sb.from('suggestion_lists').insert({ game_id: game.id, artists: shuffle(all.artists), titles: shuffle(all.titles) });
       if (error) toast('Suggestions didn’t save, so players will type freely: ' + error.message);
     }
 
     Object.assign(H, { gameId: game.id, code: game.code, songIndex: -1, round: 0, phase: 'lobby', song: null, overrides: {} });
     H.players.clear();
     save();
-    store.del('sor-library', sessionStorage);
     subscribe();
     showLobby();
     Music.activate();
@@ -1055,7 +1409,31 @@ var Host = (() => {
     $('answer-vinyl').classList.toggle('art', !!s.art);
     const block = $('answer-block'); block.classList.remove('reveal-in'); void block.offsetWidth; block.classList.add('reveal-in');
     renderGuessRows();
+    $('fix-year-form').hidden = true;
+    $('fix-year-btn').hidden = !s.key;
     $('show-board').textContent = H.round >= H.totalRounds ? 'Show the final scores' : 'Show the leaderboard';
+  }
+
+  async function fixYear() {
+    const y = parseInt($('fix-year-input').value, 10);
+    if (!(y >= 1900 && y <= 2100)) { toast('Type the year as four digits, like 1977.'); return; }
+    $('fix-year-save').disabled = true;
+    try {
+      await Library.fixYear(H.song.key, y);
+      H.song.year = String(y);
+      Object.values(H.overrides).forEach(o => { delete o.year; });   // re-mark everyone's year
+      scoreRound(H.roundRows, H.song, H.overrides);
+      H.deltas = new Map(H.roundRows.map(r => [r.player_id, r.total]));
+      save();
+      const { data: g } = await sb.from('games').select('answer').eq('id', H.gameId).maybeSingle();
+      await sb.from('games').update({ answer: Object.assign({}, g && g.answer, { year: String(y) }) }).eq('id', H.gameId);
+      await saveMarks();   // after the answer, so phones re-mark against the new year
+      $('answer-year').textContent = y;
+      $('fix-year-form').hidden = true;
+      renderGuessRows();
+      toast('Year saved for future games, and this song re-marked.');
+    } catch (e) { toast('Didn’t save: ' + e.message); }
+    $('fix-year-save').disabled = false;
   }
 
   function renderGuessRows() {
@@ -1158,11 +1536,20 @@ var Host = (() => {
       $('set-rounds').value = st.rounds || 10;
       $('set-timer').value = String(st.timer != null ? st.timer : 45);
       $('set-auto').checked = st.auto !== false;
-      $('set-suggest').value = st.suggest || 'decoys';
+      $('set-suggest').value = st.suggest === 'off' ? 'off' : 'library';
     }
-    $('playlist-file').addEventListener('change', e => { if (e.target.files[0]) loadPlaylist(e.target.files[0]); });
-    $('decoy-file').addEventListener('change', e => { if (e.target.files[0]) addDecoys(e.target.files[0]); });
-    $('decoy-clear').addEventListener('click', clearDecoys);
+    if (st) {
+      if (st.from) $('set-from').value = st.from;
+      if (st.to) $('set-to').value = st.to;
+      if (st.checkedOnly === false) $('set-checked').checked = false;
+    }
+    ['set-from', 'set-to'].forEach(id => $(id).addEventListener('input', updateSetup));
+    $('set-checked').addEventListener('change', updateSetup);
+    $('source-list').addEventListener('change', updateSetup);
+    $('open-library').addEventListener('click', () => { show('h-library'); Library.renderReview(); });
+    $('library-back').addEventListener('click', () => { show('h-setup'); renderSongsPanel(); });
+    $('fix-year-btn').addEventListener('click', () => { $('fix-year-form').hidden = false; $('fix-year-input').value = H.song.year || ''; $('fix-year-input').focus(); });
+    $('fix-year-save').addEventListener('click', fixYear);
     $('create-room').addEventListener('click', createRoom);
     $('start-game').addEventListener('click', () => { Music.activate(); startRound(); });
     $('reveal-now').addEventListener('click', reveal);
@@ -1173,9 +1560,6 @@ var Host = (() => {
     $('new-game').addEventListener('click', newGame);
     $('guess-rows').addEventListener('click', e => { const b = e.target.closest('button.mark'); if (b) cycleMark(b.dataset.id, b.dataset.field); });
 
-    const lib = store.get('sor-library', sessionStorage);
-    if (lib && lib.length) { H.library = lib; $('playlist-status').innerHTML = `<span class="ok">${lib.length} songs ready.</span>`; }
-
     const saved = store.get('sor-host');
     if (saved && saved.gameId && saved.phase !== 'finished') {
       const btn = $('resume-room');
@@ -1184,8 +1568,13 @@ var Host = (() => {
       btn.addEventListener('click', () => resume(saved));
     }
 
-    Music.init({ onChange: updateSetup, beforeLogin: () => store.set('sor-library', H.library, sessionStorage) });
-    loadDecoys();
+    Music.init({ onChange: updateSetup });
+    Library.init(renderSongsPanel);
+    Library.load().catch(e => {
+      $('lib-summary').textContent = /songs/.test(e.message) && /exist|find|schema/i.test(e.message)
+        ? 'The song library table isn’t set up yet. Run library-setup.sql in Supabase, then reload.'
+        : 'Couldn’t load the song library: ' + e.message;
+    });
     updateSetup();
   }
 
@@ -1448,6 +1837,9 @@ var Player = (() => {
   }
 
   function onGame(g) {
+    const answerChanged = P.game && g.status === 'revealed' && P.game.status === 'revealed' && g.round === P.game.round &&
+      JSON.stringify(g.answer) !== JSON.stringify(P.game.answer);
+    if (answerChanged) { P.game = g; showResult(true); return; }   // the host fixed the year
     const sameRoundRestart = P.game && g.status === 'playing' && g.round === P.game.round && g.round_started_at !== P.game.round_started_at;
     P.game = g;
     if (sameRoundRestart) { sessionStorage.removeItem(clockKey()); P.timeUp = false; startClock(); }   // host swapped the song
@@ -1651,7 +2043,10 @@ var Player = (() => {
   }
 
   async function showResult(isUpdate) {
-    const g = P.game, a = g.answer || {};
+    const g = P.game;
+    const { data: fresh } = await sb.from('games').select('answer').eq('id', P.gameId).maybeSingle();
+    if (fresh && fresh.answer) g.answer = fresh.answer;
+    const a = g.answer || {};
     const [{ data: mine }, st] = await Promise.all([
       sb.from('guesses').select('*').eq('player_id', P.playerId).eq('round', g.round).maybeSingle(),
       standings()
