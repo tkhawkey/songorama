@@ -323,6 +323,12 @@
   .year-range label { flex: 1; }
   .fix-year { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .fix-year input { width: 110px; margin: 0; display: inline-block; }
+  textarea.ai-paste { display: block; width: 100%; min-height: 140px; margin-top: 6px; resize: vertical;
+    background: var(--bg-sunk); border: 1.5px solid var(--line); border-radius: 14px;
+    padding: 12px 14px; color: var(--ink); font: 14px/1.4 ui-monospace, Consolas, monospace; }
+  textarea.ai-paste:focus { border-color: var(--lilac); outline: none; }
+  .ai-missing { margin: 0; padding: 10px 14px; max-height: 160px; overflow-y: auto; background: var(--bg-sunk); border-radius: 12px;
+    font: 13px/1.4 ui-monospace, Consolas, monospace; color: var(--muted); white-space: pre-wrap; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -430,6 +436,23 @@
         <button id="retidy-btn" class="btn small">Re-tidy all titles</button>
         <span class="hint">Re-applies the latest rules for removing things like “- 2011 Remaster” and “(feat. …)”.</span>
       </div>
+    </div>
+  </div>
+
+  <div class="lib-grid single">
+    <div class="panel">
+      <h2>Years from another AI</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button id="ai-copy" class="btn small">Copy songs that still need a year</button>
+        <span id="ai-copy-status" class="hint">Copies song_key, song and artists for every song not checked yet or to review. No years are included.</span>
+      </div>
+      <label>Paste AI answers
+        <textarea id="ai-paste" class="ai-paste" spellcheck="false" placeholder="song_key,year,confidence (one song per line)"></textarea>
+      </label>
+      <p class="hint" style="margin-top:-6px">Only high and medium answers are used, and only for songs not checked yet or to review. A year more than a year after a playlist album is flagged as a clash.</p>
+      <div><button id="ai-apply" class="btn primary">Apply AI answers</button></div>
+      <p id="ai-status" class="hint"></p>
+      <pre id="ai-missing" class="ai-missing" hidden></pre>
     </div>
   </div>
 
@@ -1149,6 +1172,90 @@ var Library = (() => {
     renderReview();
   }
 
+  /* ---------- Years from another AI ---------- */
+  const NEEDS_YEAR = ['flagged', 'unchecked'];
+  const csvField = v => /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+
+  function needingYear() { return L.songs.filter(s => NEEDS_YEAR.includes(s.year_status)); }
+
+  function needYearCSV() {
+    return ['song_key,song,artists'].concat(needingYear().map(s =>
+      [s.song_key, s.title_clean || s.title || '', (s.artists || []).join('; ')].map(v => csvField(String(v))).join(','))).join('\n');
+  }
+
+  async function copyNeedYear() {
+    const n = needingYear().length;
+    if (!n) { $('ai-copy-status').textContent = 'Every song already has a year.'; return; }
+    const text = needYearCSV();
+    try { await navigator.clipboard.writeText(text); }
+    catch (e) {   // older browsers: copy through a hidden box
+      const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
+      document.execCommand('copy'); t.remove();
+    }
+    $('ai-copy-status').innerHTML = `<span class="ok">${nf(n)} song${n === 1 ? '' : 's'} copied.</span> Paste them into the other AI.`;
+  }
+
+  // One answer per line: song_key,year,confidence. Keys never hold a comma, but the
+  // columns are read from the right anyway so a stray one can't shift them.
+  function parseAI(text) {
+    const out = [];
+    String(text || '').split(/\r?\n/).forEach(line => {
+      line = line.trim();
+      if (!line || /^```/.test(line)) return;
+      const parts = line.split(',').map(p => p.trim().replace(/^"(.*)"$/, '$1').trim());
+      if (parts.length < 2) return;
+      const conf = parts.length > 2 ? parts.pop() : '';
+      const year = parts.pop();
+      const key = parts.join(',');
+      if (key.toLowerCase() === 'song_key') return;   // header line
+      out.push({ key, year, conf: conf.toLowerCase() });
+    });
+    return out;
+  }
+
+  // Works out the changes; songs already checked, fixed or left out are never touched
+  function planAI(answers) {
+    const now = new Date().toISOString();
+    const res = { saved: 0, clashes: 0, unsure: 0, skipped: 0, missing: [], rows: new Map() };
+    answers.forEach(a => {
+      const s = L.byKey.get(a.key);
+      if (!s) { if (!res.missing.includes(a.key)) res.missing.push(a.key); return; }
+      if (!NEEDS_YEAR.includes(s.year_status) || res.rows.has(a.key)) { res.skipped++; return; }
+      const y = /^\d{4}$/.test(a.year) ? parseInt(a.year, 10) : NaN;
+      const sure = (a.conf === 'high' || a.conf === 'medium') && y >= 1900 && y <= 2100;
+      let patch;
+      if (!sure) { patch = { year_status: 'flagged', note: 'AI unsure' }; res.unsure++; }
+      else if (s.playlist_year && y > s.playlist_year + 1) { patch = { year_status: 'flagged', note: 'AI clash: later than a playlist album' }; res.clashes++; }
+      else { patch = { year: y, year_status: 'manual', note: 'Year from an AI lookup' }; res.saved++; }
+      res.rows.set(a.key, Object.assign({}, s, patch, { updated_at: now }));
+    });
+    return res;
+  }
+
+  async function applyAI() {
+    const status = $('ai-status'), missing = $('ai-missing');
+    const answers = parseAI($('ai-paste').value);
+    missing.hidden = true;
+    if (!answers.length) { status.textContent = 'Paste some lines first, like: artist|title,year,high'; return; }
+    const r = planAI(answers);
+    const rows = [...r.rows.values()];
+    $('ai-apply').disabled = true;
+    status.textContent = `Saving ${nf(rows.length)} songs…`;
+    let failed = '';
+    for (let i = 0; i < rows.length; i += 500) {
+      const { error } = await sb.from('songs').upsert(forSaving(rows.slice(i, i + 500)), { onConflict: 'song_key' });
+      if (error) { failed = error.message; break; }
+    }
+    $('ai-apply').disabled = false;
+    await load();
+    renderReview();
+    if (failed) { status.textContent = 'Saving stopped part-way: ' + failed + '. Paste again to finish; it is safe to repeat.'; return; }
+    status.innerHTML = `<span class="ok">${nf(r.saved)} saved</span>, ${nf(r.clashes)} clash${r.clashes === 1 ? '' : 'es'}, ${nf(r.unsure)} unsure, ` +
+      `${nf(r.missing.length)} key${r.missing.length === 1 ? '' : 's'} not found` +
+      (r.skipped ? `, ${nf(r.skipped)} skipped (already checked, fixed, left out, or repeated)` : '') + '.';
+    if (r.missing.length) { missing.textContent = 'Keys not found:\n' + r.missing.join('\n'); missing.hidden = false; }
+  }
+
   /* ---------- Review and fix ---------- */
   function renderStats() {
     const c = counts();
@@ -1254,6 +1361,8 @@ var Library = (() => {
       tagAction(sel.closest('tr').dataset.tag, action);
     });
     $('retidy-btn').addEventListener('click', retidy);
+    $('ai-copy').addEventListener('click', copyNeedYear);
+    $('ai-apply').addEventListener('click', applyAI);
     $('review-view').addEventListener('change', () => { L.shown = 50; renderReview(); });
     $('review-search').addEventListener('input', () => { L.shown = 50; renderReview(); });
     $('review-more').addEventListener('click', () => { L.shown += 100; renderReview(); });
