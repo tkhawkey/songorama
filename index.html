@@ -340,10 +340,12 @@
   <div class="setup-grid">
     <div class="panel">
       <h2>Spotify</h2>
-      <label>Client ID <input type="text" id="client-id" autocomplete="off" spellcheck="false"></label>
       <button id="sp-login" class="btn">Log in with Spotify</button>
       <p id="sp-status" class="hint">Not logged in.</p>
-      <details class="hint"><summary>Redirect URI for your Spotify app</summary><p style="margin-top:6px"><code id="redirect-uri"></code></p></details>
+      <details class="hint"><summary>Use a different Spotify app</summary>
+        <label style="margin-top:8px">Client ID <input type="text" id="client-id" autocomplete="off" spellcheck="false" placeholder="Leave empty to use the built-in one"></label>
+        <p style="margin-top:6px">Redirect URI to add in that app: <code id="redirect-uri"></code></p>
+      </details>
     </div>
     <div class="panel">
       <h2>Songs</h2>
@@ -640,6 +642,7 @@
    ========================================================== */
 const SUPABASE_URL = 'https://iplyanseihnkyatgpmby.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_lq5p77iHVXEh4sFGyDjg1A_B7MsDGIN';
+const SPOTIFY_CLIENT_ID = '2c6dfb3c19c14ab79088e2d221f659c1';   // not a secret: this kind of login is meant to carry it in the page
 
 /* ==========================================================
    2. SCORING: change the numbers here if you like
@@ -653,7 +656,9 @@ const SCORING = {
   fastestTitle: 1,       // bonus for the first correct title locked in
   tieWindowMs: 500       // locks this close together count as a tie for the speed bonus
 };
-const MUSIC_MAX_SECONDS = 90;   // the song fades out after this long even if guessing is still open
+const MUSIC_MAX_SECONDS = 90;
+const REVEAL_RESUME_SECONDS = 90;    // at the reveal the song comes back in at this point...
+const REVEAL_RESUME_FRACTION = 0.4;  // ...or this far through the song if that's sooner (short songs)   // the song fades out after this long even if guessing is still open
 const UNDO_MS = 1500;     // how long a player has to undo a lock
 const TIME_UP_GRACE_MS = 2500;   // wait this long after the timer before scoring, for late locks
 
@@ -1755,8 +1760,7 @@ var Music = (() => {   // named Music because Spotify’s own player script uses
   const b64url = buf => btoa(String.fromCharCode.apply(null, new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
   async function login() {
-    const clientId = $('client-id').value.trim();
-    if (!clientId) { status('Paste your Spotify Client ID first.'); return; }
+    const clientId = $('client-id').value.trim() || SPOTIFY_CLIENT_ID;
     if (!window.isSecureContext) { status('Spotify login needs an https:// address, such as GitHub Pages.'); return; }
     store.set('sor-client-id', clientId);
     const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
@@ -1904,16 +1908,33 @@ var Music = (() => {   // named Music because Spotify’s own player script uses
     return stopping;
   }
 
-  // Pick the song up again from where it stopped, fading in (the reveal)
+  // Where the song comes back in at the reveal: REVEAL_RESUME_SECONDS in, or REVEAL_RESUME_FRACTION
+  // of the way through for short songs, and never earlier than where the round stopped
+  function revealPoint(positionMs, durationMs) {
+    let target = REVEAL_RESUME_SECONDS * 1000;
+    if (durationMs) target = Math.min(target, Math.round(durationMs * REVEAL_RESUME_FRACTION));
+    return Math.max(target, positionMs || 0);
+  }
+
+  // Bring the song back in, later in the song, fading in (the reveal)
   async function resumeMusic(ms) {
     if (!stopped || !via) return;
     stopped = false;
     if (via === 'page' && player) {
       fadeToken++;
       await player.setVolume(0).catch(() => {});
+      try {
+        const st = await player.getCurrentState();
+        if (st && st.duration) await player.seek(revealPoint(st.position, st.duration));
+      } catch (e) {}
       await player.resume().catch(() => {});
       await fadeTo(VOLUME, ms || 1500);
     } else {
+      try {
+        const r = await api('/me/player');
+        const st = r.ok && r.status !== 204 ? await r.json() : null;
+        if (st && st.item) await api('/me/player/seek?position_ms=' + revealPoint(st.progress_ms, st.item.duration_ms), { method: 'PUT' });
+      } catch (e) {}
       await api('/me/player/play', { method: 'PUT' }).catch(() => {});
     }
   }
@@ -1923,7 +1944,8 @@ var Music = (() => {   // named Music because Spotify’s own player script uses
   function init(h) {
     hooks = h || {};
     $('redirect-uri').textContent = redirectUri;
-    $('client-id').value = store.get('sor-client-id') || '';
+    const savedId = store.get('sor-client-id');
+    $('client-id').value = savedId && savedId !== SPOTIFY_CLIENT_ID ? savedId : '';
     $('sp-login').addEventListener('click', login);
     status();
     loadPlayer();
