@@ -701,7 +701,7 @@ const Names = (() => {
   // Strip version tags but keep brackets that are part of the real title:
   // "Dreams - 2004 Remaster" -> "Dreams", "Get Lucky (feat. ...)" -> "Get Lucky",
   // but "9PM (Till I Come)" stays as it is.
-  const TAG = /^\s*(feat\.?|ft\.?|featuring|with|from)\b|\b(remaster(ed)?|re-?mix|mix|edit|version|live|mono|stereo|single|radio|demo|acoustic|instrumental|bonus|deluxe|anniversary|re-?record\w*|[ab] side|composers? cut|official|theme from)\b|^\s*\d{4}\s*$/i;
+  const TAG = /^\s*(feat\.?|ft\.?|featuring|with|from)\b|\b(remaster(ed)?|re-?mix|mix|edit|version|live|mono|stereo|single|radio|demo|acoustic|instrumental|bonus|deluxe|anniversary|re-?record\w*|[ab] side|composers? cut|official|theme from|\w+mix|extended|(?:end|main) titles?|soundtrack|original series|from the (?:motion picture|film|series|tv series))\b|^\s*\d{4}\s*$/i;
   function cleanTitle(t) {
     const c = String(t || '')
       .replace(/\s+-\s+(.*)$/, (m, rest) => TAG.test(rest) ? '' : m)
