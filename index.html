@@ -523,11 +523,11 @@
   </div>
   <div class="table-wrap">
     <table class="guesses">
-      <thead><tr><th>Player</th><th>Artist</th><th>Song</th><th>Year</th><th>Speed</th><th style="text-align:right">Points</th></tr></thead>
+      <thead><tr><th>Player</th><th>Song</th><th>Artist</th><th>Year</th><th>Speed</th><th style="text-align:right">Points</th></tr></thead>
       <tbody id="guess-rows"></tbody>
     </table>
   </div>
-  <p class="hint" style="margin-top:6px">⚡ marks the fastest correct artist and song. Tap any guess to change its mark.</p>
+  <p class="hint" style="margin-top:6px">⚡ marks the fastest correct song and artist. Tap any guess to change its mark.</p>
   <div class="actions"><button id="show-board" class="btn primary big" style="width:auto">Show the leaderboard</button></div>
 </section>
 
@@ -572,18 +572,18 @@
   <div class="stack" style="flex:1;display:flex;flex-direction:column">
     <h2>What’s playing?</h2>
 
-    <div class="field" id="f-artist">
-      <label for="g-artist">Artist</label>
-      <div class="field-row"><input id="g-artist" autocomplete="off" autocapitalize="words" spellcheck="false" enterkeyhint="done"><button type="button" class="lock-btn" data-lock="artist" disabled>Lock</button></div>
-      <ul class="suggest" id="s-artist"></ul>
-      <div class="locked-row" hidden><span class="tick">✓</span><span class="val"></span><button type="button" class="undo" data-undo="artist">Undo</button><span class="undo-bar"></span></div>
-    </div>
-
     <div class="field" id="f-title">
       <label for="g-title">Song title</label>
       <div class="field-row"><input id="g-title" autocomplete="off" autocapitalize="sentences" spellcheck="false" enterkeyhint="done"><button type="button" class="lock-btn" data-lock="title" disabled>Lock</button></div>
       <ul class="suggest" id="s-title"></ul>
       <div class="locked-row" hidden><span class="tick">✓</span><span class="val"></span><button type="button" class="undo" data-undo="title">Undo</button><span class="undo-bar"></span></div>
+    </div>
+
+    <div class="field" id="f-artist">
+      <label for="g-artist">Artist</label>
+      <div class="field-row"><input id="g-artist" autocomplete="off" autocapitalize="words" spellcheck="false" enterkeyhint="done"><button type="button" class="lock-btn" data-lock="artist" disabled>Lock</button></div>
+      <ul class="suggest" id="s-artist"></ul>
+      <div class="locked-row" hidden><span class="tick">✓</span><span class="val"></span><button type="button" class="undo" data-undo="artist">Undo</button><span class="undo-bar"></span></div>
     </div>
 
     <div class="field" id="f-year">
@@ -1407,7 +1407,7 @@ var Host = (() => {
     $('round-roster').innerHTML = players.map(p => {
       const g = H.guesses.get(p.id) || {};
       return `<li class="${g.done ? 'in' : ''}"><span class="who"><span class="done-dot"></span><span>${esc(p.name)}</span></span>
-        <span class="pills"><i class="${g.artist ? 'on' : ''}">Artist</i><i class="${g.title ? 'on' : ''}">Song</i><i class="${g.year ? 'on' : ''}">Year</i></span></li>`;
+        <span class="pills"><i class="${g.title ? 'on' : ''}">Song</i><i class="${g.artist ? 'on' : ''}">Artist</i><i class="${g.year ? 'on' : ''}">Year</i></span></li>`;
     }).join('');
   }
 
@@ -1596,7 +1596,7 @@ var Host = (() => {
       .sort((a, b) => (b.g ? b.g.total : -1) - (a.g ? a.g.total : -1));
     $('guess-rows').innerHTML = rows.map(({ p, g }) => g ? `<tr>
         <td>${esc(p.name)}</td>
-        <td>${markHtml(g, 'artist')}</td><td>${markHtml(g, 'title')}</td><td>${markHtml(g, 'year')}</td>
+        <td>${markHtml(g, 'title')}</td><td>${markHtml(g, 'artist')}</td><td>${markHtml(g, 'year')}</td>
         <td class="speed">${g.speed_pts ? '+' + g.speed_pts : ''}</td><td>${g.total}</td></tr>`
       : `<tr><td>${esc(p.name)}</td><td colspan="4" class="hint">Nothing locked in</td><td>0</td></tr>`).join('');
   }
@@ -2197,7 +2197,7 @@ var Player = (() => {
   function showDone(g) {
     show('p-locked');
     $('p-round-locked').textContent = `Song ${P.game.round} of ${P.game.total_rounds}`;
-    $('locked-summary').innerHTML = plainMark('A', g.artist) + plainMark('S', g.title) + plainMark('Y', g.year || '');
+    $('locked-summary').innerHTML = plainMark('S', g.title) + plainMark('A', g.artist) + plainMark('Y', g.year || '');
     startClock();
   }
 
@@ -2237,8 +2237,8 @@ var Player = (() => {
       const fastA = !!mine.fast_artist, fastT = !!mine.fast_title;
       const gap = (mine.year && a.year) ? Math.abs(mine.year - parseInt(a.year, 10)) : null;
       $('p-marks').innerHTML =
-        scoredMark(mine.artist, ap, ap > 0, fastA) +
         scoredMark(mine.title, tp, tp > 0, fastT) +
+        scoredMark(mine.artist, ap, ap > 0, fastA) +
         scoredMark(mine.year || '', yp, yp >= SCORING.year[0], false, gap ? gap + ' out' : '');
       $('p-gain').textContent = '+' + mine.total + ' this song' + (mine.speed_pts ? ` (including +${mine.speed_pts} for speed)` : '');
     } else {
