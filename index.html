@@ -321,14 +321,19 @@
   .lib-grid.single { grid-template-columns: 1fr; margin-top: 18px; }
   .year-range { display: flex; gap: 10px; }
   .year-range label { flex: 1; }
+  .awards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin: 34px 0 0; }
+  .award { background: var(--bg-raised); border-radius: 18px; padding: 16px 18px; }
+  .award .what { color: var(--amber); font-weight: 750; font-size: 15px; text-transform: uppercase; letter-spacing: .04em; }
+  .award .who { font-size: 24px; font-weight: 800; margin: 4px 0 2px; }
+  .award .detail { color: var(--muted); font-size: 15px; }
+  .phone .awards { grid-template-columns: 1fr; width: 100%; margin-top: 18px; text-align: left; }
+  .phone .award .who { font-size: 20px; }
+  .my-stats { list-style: none; padding: 0; margin: 10px 0 0; width: 100%; display: grid; gap: 8px; text-align: left; }
+  .my-stats li { background: var(--bg-raised); border-radius: 14px; padding: 12px 14px; display: flex; justify-content: space-between; gap: 10px; font-size: 17px; }
+  .my-stats b { font-variant-numeric: tabular-nums; }
+  .final-section-title { font-size: 22px; margin-top: 34px; }
   .fix-year { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .fix-year input { width: 110px; margin: 0; display: inline-block; }
-  textarea.ai-paste { display: block; width: 100%; min-height: 140px; margin-top: 6px; resize: vertical;
-    background: var(--bg-sunk); border: 1.5px solid var(--line); border-radius: 14px;
-    padding: 12px 14px; color: var(--ink); font: 14px/1.4 ui-monospace, Consolas, monospace; }
-  textarea.ai-paste:focus { border-color: var(--lilac); outline: none; }
-  .ai-missing { margin: 0; padding: 10px 14px; max-height: 160px; overflow-y: auto; background: var(--bg-sunk); border-radius: 12px;
-    font: 13px/1.4 ui-monospace, Consolas, monospace; color: var(--muted); white-space: pre-wrap; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -388,6 +393,13 @@
           <option value="off">No suggestions</option>
         </select>
       </label>
+      <label>Which songs to pick
+        <select id="set-fresh">
+          <option value="strict">Least played first</option>
+          <option value="prefer" selected>Prefer songs played less</option>
+          <option value="any">Any song, completely random</option>
+        </select>
+      </label>
       <label class="check"><input type="checkbox" id="set-auto" checked> Reveal as soon as everyone is done</label>
     </div>
   </div>
@@ -436,23 +448,6 @@
         <button id="retidy-btn" class="btn small">Re-tidy all titles</button>
         <span class="hint">Re-applies the latest rules for removing things like “- 2011 Remaster” and “(feat. …)”.</span>
       </div>
-    </div>
-  </div>
-
-  <div class="lib-grid single">
-    <div class="panel">
-      <h2>Years from another AI</h2>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-        <button id="ai-copy" class="btn small">Copy songs that still need a year</button>
-        <span id="ai-copy-status" class="hint">Copies song_key, song and artists for every song not checked yet or to review. No years are included.</span>
-      </div>
-      <label>Paste AI answers
-        <textarea id="ai-paste" class="ai-paste" spellcheck="false" placeholder="song_key,year,confidence (one song per line)"></textarea>
-      </label>
-      <p class="hint" style="margin-top:-6px">Only high and medium answers are used, and only for songs not checked yet or to review. A year more than a year after a playlist album is flagged as a clash.</p>
-      <div><button id="ai-apply" class="btn primary">Apply AI answers</button></div>
-      <p id="ai-status" class="hint"></p>
-      <pre id="ai-missing" class="ai-missing" hidden></pre>
     </div>
   </div>
 
@@ -558,7 +553,8 @@
 <section id="h-board" class="screen" hidden>
   <div class="topbar"><span id="board-label" class="round-title"></span><span>Join with code <b class="mini-code"></b></span></div>
   <ol id="board" class="board"></ol>
-  <div class="actions"><button id="next-song" class="btn primary big" style="width:auto">Play the next song</button></div>
+  <div class="actions"><button id="next-song" class="btn primary big" style="width:auto">Play the next song</button>
+    <button id="end-early" class="btn">End the game here</button></div>
 </section>
 
 <!-- ============ Host: final ============ -->
@@ -566,6 +562,7 @@
   <h1 class="final-title">Final scores</h1>
   <div id="podium" class="podium"></div>
   <ol id="final-rest" class="board"></ol>
+  <div id="awards" class="awards"></div>
   <div class="actions" style="justify-content:center"><button id="new-game" class="btn">Set up a new game</button></div>
 </section>
 
@@ -650,10 +647,13 @@
 
 <!-- ============ Phone: final ============ -->
 <section id="p-final" class="screen phone" hidden>
-  <div class="middle">
-    <p>You finished</p>
+  <div class="middle" style="justify-content:flex-start">
+    <p>Game over! You finished</p>
     <div id="p-final-rank" class="final-rank"></div>
     <p id="p-final-score" class="score-line"></p>
+    <ul id="p-my-stats" class="my-stats"></ul>
+    <div id="p-awards" class="awards"></div>
+    <h3 class="final-section-title">Top three</h3>
     <ol id="p-final-top" class="board" style="width:100%;text-align:left"></ol>
   </div>
 </section>
@@ -1172,90 +1172,6 @@ var Library = (() => {
     renderReview();
   }
 
-  /* ---------- Years from another AI ---------- */
-  const NEEDS_YEAR = ['flagged', 'unchecked'];
-  const csvField = v => /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-
-  function needingYear() { return L.songs.filter(s => NEEDS_YEAR.includes(s.year_status)); }
-
-  function needYearCSV() {
-    return ['song_key,song,artists'].concat(needingYear().map(s =>
-      [s.song_key, s.title_clean || s.title || '', (s.artists || []).join('; ')].map(v => csvField(String(v))).join(','))).join('\n');
-  }
-
-  async function copyNeedYear() {
-    const n = needingYear().length;
-    if (!n) { $('ai-copy-status').textContent = 'Every song already has a year.'; return; }
-    const text = needYearCSV();
-    try { await navigator.clipboard.writeText(text); }
-    catch (e) {   // older browsers: copy through a hidden box
-      const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select();
-      document.execCommand('copy'); t.remove();
-    }
-    $('ai-copy-status').innerHTML = `<span class="ok">${nf(n)} song${n === 1 ? '' : 's'} copied.</span> Paste them into the other AI.`;
-  }
-
-  // One answer per line: song_key,year,confidence. Keys never hold a comma, but the
-  // columns are read from the right anyway so a stray one can't shift them.
-  function parseAI(text) {
-    const out = [];
-    String(text || '').split(/\r?\n/).forEach(line => {
-      line = line.trim();
-      if (!line || /^```/.test(line)) return;
-      const parts = line.split(',').map(p => p.trim().replace(/^"(.*)"$/, '$1').trim());
-      if (parts.length < 2) return;
-      const conf = parts.length > 2 ? parts.pop() : '';
-      const year = parts.pop();
-      const key = parts.join(',');
-      if (key.toLowerCase() === 'song_key') return;   // header line
-      out.push({ key, year, conf: conf.toLowerCase() });
-    });
-    return out;
-  }
-
-  // Works out the changes; songs already checked, fixed or left out are never touched
-  function planAI(answers) {
-    const now = new Date().toISOString();
-    const res = { saved: 0, clashes: 0, unsure: 0, skipped: 0, missing: [], rows: new Map() };
-    answers.forEach(a => {
-      const s = L.byKey.get(a.key);
-      if (!s) { if (!res.missing.includes(a.key)) res.missing.push(a.key); return; }
-      if (!NEEDS_YEAR.includes(s.year_status) || res.rows.has(a.key)) { res.skipped++; return; }
-      const y = /^\d{4}$/.test(a.year) ? parseInt(a.year, 10) : NaN;
-      const sure = (a.conf === 'high' || a.conf === 'medium') && y >= 1900 && y <= 2100;
-      let patch;
-      if (!sure) { patch = { year_status: 'flagged', note: 'AI unsure' }; res.unsure++; }
-      else if (s.playlist_year && y > s.playlist_year + 1) { patch = { year_status: 'flagged', note: 'AI clash: later than a playlist album' }; res.clashes++; }
-      else { patch = { year: y, year_status: 'manual', note: 'Year from an AI lookup' }; res.saved++; }
-      res.rows.set(a.key, Object.assign({}, s, patch, { updated_at: now }));
-    });
-    return res;
-  }
-
-  async function applyAI() {
-    const status = $('ai-status'), missing = $('ai-missing');
-    const answers = parseAI($('ai-paste').value);
-    missing.hidden = true;
-    if (!answers.length) { status.textContent = 'Paste some lines first, like: artist|title,year,high'; return; }
-    const r = planAI(answers);
-    const rows = [...r.rows.values()];
-    $('ai-apply').disabled = true;
-    status.textContent = `Saving ${nf(rows.length)} songs…`;
-    let failed = '';
-    for (let i = 0; i < rows.length; i += 500) {
-      const { error } = await sb.from('songs').upsert(forSaving(rows.slice(i, i + 500)), { onConflict: 'song_key' });
-      if (error) { failed = error.message; break; }
-    }
-    $('ai-apply').disabled = false;
-    await load();
-    renderReview();
-    if (failed) { status.textContent = 'Saving stopped part-way: ' + failed + '. Paste again to finish; it is safe to repeat.'; return; }
-    status.innerHTML = `<span class="ok">${nf(r.saved)} saved</span>, ${nf(r.clashes)} clash${r.clashes === 1 ? '' : 'es'}, ${nf(r.unsure)} unsure, ` +
-      `${nf(r.missing.length)} key${r.missing.length === 1 ? '' : 's'} not found` +
-      (r.skipped ? `, ${nf(r.skipped)} skipped (already checked, fixed, left out, or repeated)` : '') + '.';
-    if (r.missing.length) { missing.textContent = 'Keys not found:\n' + r.missing.join('\n'); missing.hidden = false; }
-  }
-
   /* ---------- Review and fix ---------- */
   function renderStats() {
     const c = counts();
@@ -1310,6 +1226,14 @@ var Library = (() => {
     renderReview();
   }
 
+  // Called once a song's round has been revealed
+  async function recordPlay(key) {
+    const s = L.byKey.get(key);
+    const plays = (s && s.play_count || 0) + 1;
+    const { error } = await sb.from('songs').update({ play_count: plays, last_played: new Date().toISOString() }).eq('song_key', key);
+    if (!error && s) { s.play_count = plays; }
+  }
+
   // Used by the reveal screen's "Wrong year?" button
   async function fixYear(key, year) {
     const patch = { year, year_status: 'manual', note: 'Fixed during a game', updated_at: new Date().toISOString() };
@@ -1341,7 +1265,8 @@ var Library = (() => {
   }
   const toGameSong = s => ({
     key: s.song_key, uri: s.uri, title: s.title, artistRaw: (s.artists || []).join(';'),
-    artist: (s.artists || []).join(', '), year: s.year ? String(s.year) : '', art: s.art || ''
+    artist: (s.artists || []).join(', '), year: s.year ? String(s.year) : '', art: s.art || '',
+    tags: s.sources || [], plays: s.play_count || 0
   });
 
   function init(onChange) {
@@ -1361,8 +1286,6 @@ var Library = (() => {
       tagAction(sel.closest('tr').dataset.tag, action);
     });
     $('retidy-btn').addEventListener('click', retidy);
-    $('ai-copy').addEventListener('click', copyNeedYear);
-    $('ai-apply').addEventListener('click', applyAI);
     $('review-view').addEventListener('change', () => { L.shown = 50; renderReview(); });
     $('review-search').addEventListener('input', () => { L.shown = 50; renderReview(); });
     $('review-more').addEventListener('click', () => { L.shown += 100; renderReview(); });
@@ -1373,7 +1296,7 @@ var Library = (() => {
     window.addEventListener('beforeunload', e => { if (L.checking) { e.preventDefault(); e.returnValue = ''; } });
   }
 
-  return { init, load, counts, sources, pick, names, toGameSong, fixYear, renderReview, isChecking: () => L.checking };
+  return { init, load, counts, sources, pick, names, toGameSong, fixYear, recordPlay, renderReview, isChecking: () => L.checking };
 })();
 
 /* ==========================================================
@@ -1390,7 +1313,7 @@ var Host = (() => {
   const save = () => store.set('sor-host', {
     gameId: H.gameId, code: H.code, order: H.order, songIndex: H.songIndex, round: H.round,
     totalRounds: H.totalRounds, roundSeconds: H.roundSeconds, autoReveal: H.autoReveal,
-    phase: H.phase, song: H.song, roundStart: H.roundStart, overrides: H.overrides
+    phase: H.phase, song: H.song, roundStart: H.roundStart, overrides: H.overrides, history: H.history
   });
 
   /* ---------- Choosing songs from the library ---------- */
@@ -1418,7 +1341,11 @@ var Host = (() => {
     $('source-list').classList.toggle('off', ch.tagMode === 'all');
     H.library = Library.pick(ch).map(Library.toGameSong);
     const n = H.library.length;
-    $('match-count').textContent = Library.counts().total ? `${n.toLocaleString('en-GB')} song${n === 1 ? '' : 's'} match these choices.` : '';
+    let breakdown = '';
+    if (ch.tagMode !== 'all' && ch.tags.length > 1) {
+      breakdown = ' ' + ch.tags.map(t => `${t}: ${H.library.filter(s => (s.tags || []).includes(t)).length}`).join(', ') + '.';
+    }
+    $('match-count').textContent = Library.counts().total ? `${n.toLocaleString('en-GB')} song${n === 1 ? '' : 's'} match these choices.${breakdown}` : '';
     const ready = n > 0 && Music.loggedIn();
     $('create-room').disabled = !ready;
     $('setup-status').textContent = ready ? '' : !Music.loggedIn() ? 'Log in with Spotify to continue.'
@@ -1435,16 +1362,29 @@ var Host = (() => {
   }
   function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
+  // strict: least played first (random within each play count)
+  // prefer: random, but each extra play makes a song much less likely to come up
+  // any: plain shuffle
+  function orderSongs(list, mode) {
+    if (mode === 'any') return shuffle(list);
+    if (mode === 'strict') {
+      return shuffle(list).sort((a, b) => (a.plays || 0) - (b.plays || 0));   // the sort is stable, so ties stay shuffled
+    }
+    return list.map(s => ({ s, k: Math.pow(Math.random(), Math.pow(1 + (s.plays || 0), 2)) }))
+      .sort((a, b) => b.k - a.k).map(x => x.s);
+  }
+
   async function createRoom() {
     $('create-room').disabled = true;
     $('setup-status').textContent = 'Opening the room…';
-    H.order = shuffle(H.library);
+    H.order = orderSongs(H.library, $('set-fresh').value);
+    H.history = [];
     H.totalRounds = Math.max(1, Math.min(parseInt($('set-rounds').value, 10) || 10, H.order.length));
     H.roundSeconds = parseInt($('set-timer').value, 10) || 0;
     H.autoReveal = $('set-auto').checked;
     const mode = $('set-suggest').value;
     const ch = choices();
-    store.set('sor-settings', { rounds: parseInt($('set-rounds').value, 10) || 10, timer: H.roundSeconds, auto: H.autoReveal, suggest: mode,
+    store.set('sor-settings', { rounds: parseInt($('set-rounds').value, 10) || 10, timer: H.roundSeconds, auto: H.autoReveal, suggest: mode, fresh: $('set-fresh').value,
       tags: ch.tags, tagMode: ch.tagMode, from: ch.from, to: ch.to, checkedOnly: ch.checkedOnly });
 
     let game = null;
@@ -1640,6 +1580,9 @@ var Host = (() => {
     H.song.art = answer.art;
     await sb.from('games').update({ status: 'revealed', answer }).eq('id', H.gameId);
     H.phase = 'revealed'; H.revealing = false;
+    H.history = (H.history || []).filter(r => r.round !== H.round)
+      .concat({ round: H.round, key: H.song.key, title: answer.title, artist: H.song.artist, year: H.song.year, startedAt: H.roundStartedAt });
+    if (H.song.key) Library.recordPlay(H.song.key);
     save();
     await fading;
     showReveal();
@@ -1684,6 +1627,7 @@ var Host = (() => {
     try {
       await Library.fixYear(H.song.key, y);
       H.song.year = String(y);
+      (H.history || []).forEach(r => { if (r.round === H.round) r.year = String(y); });
       Object.values(H.overrides).forEach(o => { delete o.year; });   // re-mark everyone's year
       scoreRound(H.roundRows, H.song, H.overrides);
       H.deltas = new Map(H.roundRows.map(r => [r.player_id, r.total]));
@@ -1761,12 +1705,91 @@ var Host = (() => {
     clearInterval(H.timer); clearInterval(H.poll);
     H.phase = 'finished'; save();
     Music.pause();
-    await sb.from('games').update({ status: 'finished' }).eq('id', H.gameId);
+    let summary = null;
+    try { summary = await buildSummary(); } catch (e) {}
+    await sb.from('games').update({ status: 'finished', summary }).eq('id', H.gameId);
     show('h-final');
+    $('awards').innerHTML = summary ? awardsHtml(summary) : '';
     const list = sortedPlayers();
     $('podium').innerHTML = [[1, 'p2'], [0, 'p1'], [2, 'p3']].filter(([i]) => list[i]).map(([i, cls]) => `<div class="step ${cls}">
       <div class="who">${esc(list[i].name)}</div><div class="pts">${list[i].score} points</div><div class="block">${i + 1}</div></div>`).join('');
     $('final-rest').innerHTML = list.slice(3).map((p, i) => `<li><span class="rank">${ordinal(i + 4)}</span><span class="name">${esc(p.name)}</span><span class="bar"></span><span class="score">${p.score}</span><span></span></li>`).join('');
+  }
+
+  /* ---------- End-of-game stats (shared with the phones through games.summary) ---------- */
+  async function buildSummary() {
+    const { data } = await sb.from('guesses').select('*').eq('game_id', H.gameId);
+    const rows = (data || []).filter(g => g.total != null);
+    const rounds = new Map((H.history || []).map(r => [r.round, r]));
+    const name = id => (H.players.get(id) || {}).name || 'Someone';
+    const ranked = sortedPlayers();
+    const per = {};
+    ranked.forEach(p => {
+      per[p.id] = { rank: ranked.filter(q => q.score > p.score).length + 1, score: p.score, songs: 0,
+        titles: 0, artists: 0, exact: 0, gaps: [], fast: 0, quickest: null, best: null };
+    });
+    rows.forEach(g => {
+      const s = per[g.player_id]; if (!s) return;
+      const r = rounds.get(g.round) || {};
+      s.songs++;
+      if (g.title_pts > 0) s.titles++;
+      if (g.artist_pts > 0) s.artists++;
+      if (g.fast_title) s.fast++;
+      if (g.fast_artist) s.fast++;
+      const y = parseInt(r.year, 10);
+      if (y && g.year) { const gap = Math.abs(g.year - y); s.gaps.push(gap); if (gap === 0) s.exact++; }
+      if (r.startedAt) {
+        [['title', g.title_pts], ['artist', g.artist_pts]].forEach(([f, pts]) => {
+          if (pts > 0 && g[f + '_at']) {
+            const secs = (new Date(g[f + '_at']).getTime() - r.startedAt) / 1000;
+            if (secs >= 0 && (s.quickest == null || secs < s.quickest)) s.quickest = secs;
+          }
+        });
+      }
+      if (!s.best || g.total > s.best.points) s.best = { points: g.total, title: r.title || '' };
+    });
+    Object.values(per).forEach(s => { s.avgGap = s.gaps.length ? s.gaps.reduce((a, b) => a + b, 0) / s.gaps.length : null; delete s.gaps; });
+
+    const ids = Object.keys(per);
+    const top = (fn, min, low) => {
+      const vals = ids.map(id => ({ id, v: fn(per[id]) })).filter(x => x.v != null && (low ? true : x.v >= (min || 1)));
+      if (!vals.length) return null;
+      const best = low ? Math.min(...vals.map(x => x.v)) : Math.max(...vals.map(x => x.v));
+      return { who: vals.filter(x => x.v === best).map(x => name(x.id)), v: best };
+    };
+    const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    const awards = [];
+    const add = (what, res, detail) => { if (res) awards.push({ what, who: res.who, detail: detail(res.v) }); };
+    add('Name that tune', top(s => s.titles), v => plural(v, 'song title') + ' right');
+    add('Artist anorak', top(s => s.artists), v => plural(v, 'artist') + ' right');
+    add('Time traveller', top(s => s.exact), v => plural(v, 'year') + ' spot on');
+    add('Human calendar', top(s => s.avgGap, 0, true), v => (v < 1 ? 'less than a year' : 'about ' + plural(Math.round(v), 'year')) + ' out on average');
+    add('Fastest fingers', top(s => s.fast), v => v + (v === 1 ? ' speed bonus' : ' speed bonuses'));
+    add('Quick draw', top(s => s.quickest, 0, true), v => `a right answer locked after ${v.toFixed(1)} seconds`);
+
+    // Songs of the night
+    const bySong = [...rounds.values()].map(r => {
+      const gs = rows.filter(g => g.round === r.round);
+      const right = gs.reduce((a, g) => a + (g.title_pts > 0) + (g.artist_pts > 0), 0);
+      const gaps = gs.filter(g => g.year && parseInt(r.year, 10)).map(g => Math.abs(g.year - parseInt(r.year, 10)));
+      return { title: r.title, artist: r.artist, share: gs.length ? right / (2 * gs.length) : 0, n: gs.length,
+               gap: gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : null };
+    }).filter(s => s.n > 0);
+    const songs = [];
+    if (bySong.length > 1) {
+      const known = bySong.slice().sort((a, b) => b.share - a.share)[0];
+      const stump = bySong.slice().sort((a, b) => a.share - b.share)[0];
+      if (known.share >= 0.6) songs.push({ what: 'Everyone knew this one', who: [`${known.title}`], detail: `${known.artist}, ${Math.round(known.share * 100)}% of answers right` });
+      if (stump !== known && stump.share <= 0.4) songs.push({ what: 'The stumper', who: [`${stump.title}`], detail: `${stump.artist}, ${Math.round(stump.share * 100)}% of answers right` });
+      const dated = bySong.filter(s => s.gap != null).sort((a, b) => b.gap - a.gap)[0];
+      if (dated && dated.gap >= 3) songs.push({ what: 'Older (or newer) than you think', who: [`${dated.title}`], detail: `guesses were ${Math.round(dated.gap)} years out on average` });
+    }
+    return { rounds: rounds.size, players: per, awards, songs };
+  }
+
+  function awardsHtml(summary) {
+    return summary.awards.concat(summary.songs).map(a => `<div class="award"><div class="what">${esc(a.what)}</div>
+      <div class="who">${a.who.map(esc).join(' &amp; ')}</div><div class="detail">${esc(a.detail)}</div></div>`).join('');
   }
 
   function newGame() {
@@ -1799,6 +1822,7 @@ var Host = (() => {
       $('set-rounds').value = st.rounds || 10;
       $('set-timer').value = String(st.timer != null ? st.timer : 45);
       $('set-auto').checked = st.auto !== false;
+      if (st.fresh) $('set-fresh').value = st.fresh;
       $('set-suggest').value = st.suggest === 'off' ? 'off' : 'library';
     }
     if (st) {
@@ -1823,6 +1847,7 @@ var Host = (() => {
     $('swap-song').addEventListener('click', swapSong);
     $('show-board').addEventListener('click', showBoard);
     $('next-song').addEventListener('click', () => { Music.activate(); startRound(); });
+    $('end-early').addEventListener('click', () => { if (confirm('End the game now and show the final scores?')) finishGame(); });
     $('new-game').addEventListener('click', newGame);
     $('guess-rows').addEventListener('click', e => { const b = e.target.closest('button.mark'); if (b) cycleMark(b.dataset.id, b.dataset.field); });
 
@@ -2359,11 +2384,28 @@ var Player = (() => {
 
   async function showFinal() {
     const st = await standings();
+    const { data: g } = await sb.from('games').select('summary').eq('id', P.gameId).maybeSingle();
+    const sum = g && g.summary;
     show('p-final');
     $('p-final-rank').textContent = st.rank ? ordinal(st.rank) : '';
-    $('p-final-score').textContent = st.me ? st.me.score + ' points' : '';
+    $('p-final-score').textContent = st.me ? st.me.score + ' points' + (st.list.length > 1 ? ` out of ${st.list.length} players` : '') : '';
+    const mine = sum && sum.players && sum.players[P.playerId];
+    const line = (label, value) => `<li><span>${label}</span><b>${value}</b></li>`;
+    $('p-my-stats').innerHTML = mine ? [
+      line('Song titles right', `${mine.titles} of ${mine.songs}`),
+      line('Artists right', `${mine.artists} of ${mine.songs}`),
+      line('Years spot on', mine.exact),
+      mine.avgGap != null ? line('Average year guess', mine.avgGap < 0.5 ? 'spot on' : `${mine.avgGap.toFixed(1)} years out`) : '',
+      mine.fast ? line('Speed bonuses', mine.fast) : '',
+      mine.quickest != null ? line('Quickest right answer', `${mine.quickest.toFixed(1)} s`) : '',
+      mine.best && mine.best.title ? line('Best song', `${esc(mine.best.title)} (+${mine.best.points})`) : ''
+    ].join('') : '';
+    const myName = P.name;
+    const mineAwards = sum ? sum.awards.filter(a => a.who.includes(myName)) : [];
+    $('p-awards').innerHTML = mineAwards.map(a => `<div class="award"><div class="what">${esc(a.what)}</div>
+      <div class="who">That’s you!</div><div class="detail">${esc(a.detail)}</div></div>`).join('');
     $('p-final-top').innerHTML = st.list.slice(0, 3).map((p, i) =>
-      `<li style="grid-template-columns:40px 1fr 60px"><span class="rank">${ordinal(i + 1)}</span><span class="name">${esc(p.name)}</span><span class="score">${p.score}</span></li>`).join('');
+      `<li style="grid-template-columns:40px 1fr 60px"><span class="rank">${ordinal(st.list.filter(q => q.score > p.score).length + 1)}</span><span class="name">${esc(p.name)}</span><span class="score">${p.score}</span></li>`).join('');
   }
 
   /* ---------- Wire up ---------- */
