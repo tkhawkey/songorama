@@ -321,6 +321,14 @@
   .lib-grid.single { grid-template-columns: 1fr; margin-top: 18px; }
   .year-range { display: flex; gap: 10px; }
   .year-range label { flex: 1; }
+  .year-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: rgba(255,196,71,.12);
+    color: var(--amber); border-radius: 12px; padding: 8px 12px; font-size: 14px; font-weight: 650; }
+  .year-note button { border: 0; border-radius: 999px; padding: 5px 12px; background: var(--amber); color: #2a1c00; font-weight: 750; cursor: pointer; }
+  .decades { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .decades button { border: 0; border-radius: 999px; padding: 8px 12px; font-weight: 700; font-size: 14px; cursor: pointer;
+    background: var(--lilac); color: #140f2b; }
+  .decades button span { font-weight: 500; opacity: .75; margin-left: 4px; font-variant-numeric: tabular-nums; }
+  .decades button.off { background: var(--bg-sunk); color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--line); text-decoration: line-through; }
   .awards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin: 34px 0 0; }
   .award { background: var(--bg-raised); border-radius: 18px; padding: 16px 18px; }
   .award .what { color: var(--amber); font-weight: 750; font-size: 15px; text-transform: uppercase; letter-spacing: .04em; }
@@ -367,11 +375,16 @@
         <label class="check"><input type="radio" name="tag-mode" value="every"> Only songs with every ticked tag</label>
       </div>
       <div id="source-list" class="source-list"></div>
+      <div>
+        <label>Decades <span class="hint" style="font-weight:500">(tap one to leave it out)</span></label>
+        <div id="decades" class="decades"></div>
+      </div>
       <div class="year-range">
         <label>From year <input type="number" id="set-from" min="1900" max="2100" placeholder="Any"></label>
         <label>To year <input type="number" id="set-to" min="1900" max="2100" placeholder="Any"></label>
       </div>
-      <label class="check"><input type="checkbox" id="set-checked" checked> Only songs with checked years</label>
+      <div id="year-note" class="year-note" hidden><span id="year-note-text"></span><button type="button" id="year-clear">Clear</button></div>
+      <label class="check"><input type="checkbox" id="set-checked" checked> Only use songs with a confirmed year</label>
       <p id="match-count" class="hint"></p>
       <button id="open-library" class="btn">Open the song library</button>
     </div>
@@ -1248,6 +1261,7 @@ var Library = (() => {
     return L.songs.filter(s => {
       if (s.year_status === 'excluded' || !s.uri) return false;
       if (opts.checkedOnly && !USABLE.includes(s.year_status)) return false;
+      if (opts.decadesOff && opts.decadesOff.length && opts.decadesOff.includes(decadeOf(s.year))) return false;
       if (opts.from && !(s.year >= opts.from)) return false;
       if (opts.to && !(s.year <= opts.to)) return false;
       const tags = s.sources || [];
@@ -1263,6 +1277,9 @@ var Library = (() => {
       titles: Names.mergeUnique(usable.map(s => s.title_clean))
     };
   }
+  // "pre1960", "1960", "1970"… ; songs with no year count as "none"
+  function decadeOf(y) { y = parseInt(y, 10); if (!y) return 'none'; return y < 1960 ? 'pre1960' : String(Math.floor(y / 10) * 10); }
+
   const toGameSong = s => ({
     key: s.song_key, uri: s.uri, title: s.title, artistRaw: (s.artists || []).join(';'),
     artist: (s.artists || []).join(', '), year: s.year ? String(s.year) : '', art: s.art || '',
@@ -1296,7 +1313,7 @@ var Library = (() => {
     window.addEventListener('beforeunload', e => { if (L.checking) { e.preventDefault(); e.returnValue = ''; } });
   }
 
-  return { init, load, counts, sources, pick, names, toGameSong, fixYear, recordPlay, renderReview, isChecking: () => L.checking };
+  return { init, load, counts, sources, pick, names, toGameSong, fixYear, recordPlay, renderReview, decadeOf, isChecking: () => L.checking };
 })();
 
 /* ==========================================================
@@ -1318,10 +1335,11 @@ var Host = (() => {
 
   /* ---------- Choosing songs from the library ---------- */
   function choices() {
+    const decadesOff = [...document.querySelectorAll('#decades button.off')].map(b => b.dataset.decade);
     const from = parseInt($('set-from').value, 10) || null, to = parseInt($('set-to').value, 10) || null;
     const tags = [...document.querySelectorAll('#source-list input:checked')].map(i => i.value);
     const tagMode = (document.querySelector('input[name="tag-mode"]:checked') || {}).value || 'any';
-    return { from, to, tags, tagMode, checkedOnly: $('set-checked').checked };
+    return { decadesOff, from, to, tags, tagMode, checkedOnly: $('set-checked').checked };
   }
 
   function renderSongsPanel() {
@@ -1336,9 +1354,29 @@ var Host = (() => {
     updateSetup();
   }
 
+  // Decade buttons: all on at the start of every session; counts show what each would add
+  const DECADES = [['pre1960', 'Before 1960'], ['1960', '1960s'], ['1970', '1970s'], ['1980', '1980s'],
+                   ['1990', '1990s'], ['2000', '2000s'], ['2010', '2010s'], ['2020', '2020s']];
+  function renderDecades(ch) {
+    const box = $('decades');
+    const off = new Set(ch.decadesOff);
+    const pool = Library.pick(Object.assign({}, ch, { decadesOff: [], from: null, to: null }));
+    const count = {};
+    pool.forEach(s => { const d = Library.decadeOf(s.year); count[d] = (count[d] || 0) + 1; });
+    box.innerHTML = DECADES.map(([d, label]) =>
+      `<button type="button" data-decade="${d}" class="${off.has(d) ? 'off' : ''}" aria-pressed="${!off.has(d)}">${label}<span>${count[d] || 0}</span></button>`).join('');
+  }
+
   function updateSetup() {
     const ch = choices();
     $('source-list').classList.toggle('off', ch.tagMode === 'all');
+    renderDecades(ch);
+    // Make an active year filter impossible to miss
+    const bits = [];
+    if (ch.from || ch.to) bits.push(ch.from && ch.to ? `${ch.from} to ${ch.to}` : ch.from ? `${ch.from} onwards` : `up to ${ch.to}`);
+    if (ch.decadesOff.length) bits.push('leaving out ' + DECADES.filter(([d]) => ch.decadesOff.includes(d)).map(([, l]) => l).join(', '));
+    $('year-note').hidden = !bits.length;
+    $('year-note-text').textContent = 'Year filter on: ' + bits.join('; ');
     H.library = Library.pick(ch).map(Library.toGameSong);
     const n = H.library.length;
     let breakdown = '';
@@ -1351,7 +1389,7 @@ var Host = (() => {
     $('setup-status').textContent = ready ? '' : !Music.loggedIn() ? 'Log in with Spotify to continue.'
       : !Library.counts().total ? 'Add a playlist to the song library to continue.'
       : ch.tagMode !== 'all' && !ch.tags.length ? 'Tick at least one tag, or choose All songs in the library.'
-      : 'No songs match these choices. Widen the years, tick more tags, or untick “Only songs with checked years”.';
+      : 'No songs match these choices. Clear the year filter, or tick more tags.';
   }
 
   /* ---------- Room ---------- */
@@ -1385,7 +1423,7 @@ var Host = (() => {
     const mode = $('set-suggest').value;
     const ch = choices();
     store.set('sor-settings', { rounds: parseInt($('set-rounds').value, 10) || 10, timer: H.roundSeconds, auto: H.autoReveal, suggest: mode, fresh: $('set-fresh').value,
-      tags: ch.tags, tagMode: ch.tagMode, from: ch.from, to: ch.to, checkedOnly: ch.checkedOnly });
+      tags: ch.tags, tagMode: ch.tagMode, checkedOnly: ch.checkedOnly });
 
     let game = null;
     for (let attempt = 0; attempt < 6 && !game; attempt++) {
@@ -1826,14 +1864,21 @@ var Host = (() => {
       $('set-suggest').value = st.suggest === 'off' ? 'off' : 'library';
     }
     if (st) {
-      if (st.from) $('set-from').value = st.from;
-      if (st.to) $('set-to').value = st.to;
       if (st.checkedOnly === false) $('set-checked').checked = false;
       const mode = document.querySelector(`input[name="tag-mode"][value="${st.tagMode || 'any'}"]`);
       if (mode) mode.checked = true;
     }
     document.querySelectorAll('input[name="tag-mode"]').forEach(r => r.addEventListener('change', updateSetup));
     ['set-from', 'set-to'].forEach(id => $(id).addEventListener('input', updateSetup));
+    $('year-clear').addEventListener('click', () => {
+      $('set-from').value = ''; $('set-to').value = '';
+      document.querySelectorAll('#decades button.off').forEach(b => b.classList.remove('off'));
+      updateSetup();
+    });
+    $('decades').addEventListener('click', e => {
+      const b = e.target.closest('button[data-decade]');
+      if (b) { b.classList.toggle('off'); updateSetup(); }
+    });
     $('set-checked').addEventListener('change', updateSetup);
     $('source-list').addEventListener('change', updateSetup);
     $('open-library').addEventListener('click', () => { show('h-library'); Library.renderReview(); });
